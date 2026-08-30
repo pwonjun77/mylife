@@ -121,7 +121,6 @@
 <div class="app-container">
     <h1>✨ Timing Note</h1>
     
-    <!-- 온보딩 섹션 -->
     <div id="onboarding-section" class="card">
         <div class="card-title">🐾 Profile Setup</div>
         <div class="card-content">
@@ -131,9 +130,7 @@
         </div>
     </div>
 
-    <!-- 메인 대시보드 -->
     <div id="main-section" class="hidden">
-        <!-- 컴패니언 아바타 말풍선 카드 -->
         <div class="card" style="display: flex; align-items: center; gap: 14px;">
             <div style="width: 48px; height: 48px; min-width: 48px; border: 2px solid #1a1a1a; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; background: #ffffff;">🍀</div>
             <div style="flex: 1;">
@@ -144,13 +141,11 @@
             </div>
         </div>
 
-        <!-- 모닝 브리핑 카드 -->
         <div class="card">
             <div class="card-title">☀️ Today's Briefing</div>
             <div class="card-content" id="briefing-text"></div>
         </div>
 
-        <!-- 저녁 디브리프 카드 -->
         <div class="card">
             <div class="card-title">🌙 Evening Check-in</div>
             <div class="card-content">
@@ -163,7 +158,6 @@
             </div>
         </div>
 
-        <!-- 프로필 재설정 버튼 -->
         <button type="button" onclick="resetProfile()" style="background: transparent; color: #888; border: 1px dashed #ccc; font-size: 12px; padding: 10px; margin-top: 5px;">
             ⚙️ 생년월일 다시 설정하기
         </button>
@@ -196,11 +190,13 @@
         return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
     }
 
+    // 타임존 오차 방지를 위해 UTC 절대 시간 기준으로 간지 계산 (수정됨)
     function getGanji(date) {
-        const baseDate = new Date(1900, 0, 1);
-        const diffTime = date.getTime() - baseDate.getTime();
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        const startIndex = 10;
+        const baseTime = Date.UTC(1900, 0, 1);
+        const targetTime = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+        const diffDays = Math.floor((targetTime - baseTime) / (1000 * 60 * 60 * 24));
+        
+        const startIndex = 10; // 1900년 1월 1일은 갑술(甲戌)일
         const index = (startIndex + diffDays) % 60;
         
         const sIdx = ((index % 10) + 10) % 10;
@@ -236,6 +232,7 @@
 
         const birthDate = parseLocalDate(birthDateStr);
         const today = new Date();
+        today.setHours(0,0,0,0);
         
         if (birthDate > today) {
             alert('생년월일은 오늘보다 미래일 수 없습니다.');
@@ -243,7 +240,6 @@
         }
         
         safeStorage.setItem('user_birth', birthDateStr);
-        
         document.getElementById('onboarding-section').classList.add('hidden');
         document.getElementById('main-section').classList.remove('hidden');
         
@@ -265,7 +261,6 @@
         const userStem = userGanji.stem;
         const todayStem = todayGanji.stem;
 
-        // 개인별 일간 vs 일진 상호작용 분석 로직
         let message = "";
         if (userStem === todayStem) {
             message = `나의 일간(${userStem})과 오늘의 기운(${todayGanji.fullName})이 동일하게 겹치는 날입니다. 내 주관과 에너지가 아주 강해지니 주도적으로 업무나 일정을 리드하기에 최적입니다.`;
@@ -285,7 +280,6 @@
             message = `오늘의 일진(${todayGanji.fullName})과 나의 일간(${userStem}) 사이에 가벼운 긴장과 변동성이 형성되는 날입니다. 중요한 결정은 서두르지 말고 오후에 차분히 점검하세요.`;
         }
 
-        // 최근 8회 중복 방지 필터
         let history = [];
         try {
             history = JSON.parse(safeStorage.getItem('prescription_history') || '[]');
@@ -343,7 +337,6 @@
         }
     }
 
-    // 자동 로드 처리
     window.addEventListener('DOMContentLoaded', function() {
         const savedBirth = safeStorage.getItem('user_birth');
         if (savedBirth) {
