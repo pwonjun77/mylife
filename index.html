@@ -87,7 +87,7 @@
             background: #fff;
             text-align: center;
         }
-        .hidden { display: none; }
+        .hidden { display: none !important; }
         .tag {
             display: inline-flex;
             align-items: center;
@@ -127,7 +127,7 @@
         <div class="card-content">
             <label style="font-size: 12px; color: #777; display:block; margin-bottom:6px;">생년월일을 선택해주세요</label>
             <input type="date" id="birth-date" value="1977-03-24">
-            <button onclick="initApp()">타이밍 엔진 구동하기</button>
+            <button type="button" onclick="initApp()">타이밍 엔진 구동하기</button>
         </div>
     </div>
 
@@ -139,7 +139,7 @@
             <div style="flex: 1;">
                 <div style="font-size: 11px; font-weight: 700; color: #666; margin-bottom: 2px;">타이밍 메이트</div>
                 <div style="font-size: 13px; line-height: 1.4;" id="companion-speech">
-                    환영해요! 오늘의 타이밍 브리핑을 준비했어요.
+                    환영해요! 오늘의 맞춤 에너지를 분석해 두었어요.
                 </div>
             </div>
         </div>
@@ -156,12 +156,17 @@
             <div class="card-content">
                 <p style="margin-top: 0; font-size: 13px;">오늘 예보처럼 은근히 바쁘거나 뜻대로 안 풀린 순간이 있었나요?</p>
                 <div class="feedback-btns">
-                    <button onclick="handleFeedback('yes')">맞아요, 변동이 있었어요 😅</button>
-                    <button onclick="handleFeedback('no')">아니요, 평온했어요 ✨</button>
+                    <button type="button" onclick="handleFeedback('yes')">맞아요, 변동이 있었어요 😅</button>
+                    <button type="button" onclick="handleFeedback('no')">아니요, 평온했어요 ✨</button>
                 </div>
                 <p id="feedback-result" style="margin-top: 12px; font-size: 13px; font-weight: 600; color: #555;"></p>
             </div>
         </div>
+
+        <!-- 프로필 재설정 버튼 -->
+        <button type="button" onclick="resetProfile()" style="background: transparent; color: #888; border: 1px dashed #ccc; font-size: 12px; padding: 10px; margin-top: 5px;">
+            ⚙️ 생년월일 다시 설정하기
+        </button>
     </div>
 </div>
 
@@ -185,6 +190,7 @@
     ];
 
     function parseLocalDate(dateStr) {
+        if (!dateStr) return new Date();
         const parts = dateStr.split('-');
         if (parts.length !== 3) return new Date();
         return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
@@ -196,10 +202,14 @@
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
         const startIndex = 10;
         const index = (startIndex + diffDays) % 60;
+        
+        const sIdx = ((index % 10) + 10) % 10;
+        const bIdx = ((index % 12) + 12) % 12;
+        
         return {
-            stem: stems[((index % 10) + 10) % 10],
-            branch: branches[((index % 12) + 12) % 12],
-            fullName: stems[((index % 10) + 10) % 10] + branches[((index % 12) + 12) % 12]
+            stem: stems[sIdx],
+            branch: branches[bIdx],
+            fullName: stems[sIdx] + branches[bIdx]
         };
     }
 
@@ -209,20 +219,17 @@
         },
         setItem(key, value) {
             try { localStorage.setItem(key, value); } catch (e) {}
-        }
-    };
-
-    // 페이지 로드 시 기존 저장된 생년월일이 있으면 자동 세팅
-    window.onload = function() {
-        const savedBirth = safeStorage.getItem('user_birth');
-        if (savedBirth) {
-            document.getElementById('birth-date').value = savedBirth;
+        },
+        removeItem(key) {
+            try { localStorage.removeItem(key); } catch (e) {}
         }
     };
 
     function initApp() {
-        const birthDateStr = document.getElementById('birth-date').value;
-        if(!birthDateStr) {
+        const birthDateInput = document.getElementById('birth-date');
+        const birthDateStr = birthDateInput ? birthDateInput.value : '';
+        
+        if (!birthDateStr) {
             alert('생년월일을 입력해주세요.');
             return;
         }
@@ -236,10 +243,18 @@
         }
         
         safeStorage.setItem('user_birth', birthDateStr);
+        
         document.getElementById('onboarding-section').classList.add('hidden');
         document.getElementById('main-section').classList.remove('hidden');
         
         generateUniqueBriefing(birthDateStr);
+    }
+
+    function resetProfile() {
+        safeStorage.removeItem('user_birth');
+        document.getElementById('main-section').classList.add('hidden');
+        document.getElementById('onboarding-section').classList.remove('hidden');
+        document.getElementById('feedback-result').innerText = '';
     }
 
     function generateUniqueBriefing(birthStr) {
@@ -250,24 +265,31 @@
         const userStem = userGanji.stem;
         const todayStem = todayGanji.stem;
 
-        // 나의 일간과 오늘의 일진 조합에 따른 맞춤형 에너지 메시지 풀
+        // 개인별 일간 vs 일진 상호작용 분석 로직
         let message = "";
         if (userStem === todayStem) {
-            message = `나의 일간(${userStem})과 오늘의 기운(${todayGanji.fullName})이 강력하게 겹치는 날입니다! 주도적으로 일을 밀어붙이기 좋지만 고집이 강해질 수 있으니 여유를 가져보세요.`;
+            message = `나의 일간(${userStem})과 오늘의 기운(${todayGanji.fullName})이 동일하게 겹치는 날입니다. 내 주관과 에너지가 아주 강해지니 주도적으로 업무나 일정을 리드하기에 최적입니다.`;
         } else if ((['갑','을'].includes(userStem) && ['병','정'].includes(todayStem)) ||
                    (['병','정'].includes(userStem) && ['무','기'].includes(todayStem)) ||
                    (['무','기'].includes(userStem) && ['경','신'].includes(todayStem)) ||
                    (['경','신'].includes(userStem) && ['임','계'].includes(todayStem)) ||
                    (['임','계'].includes(userStem) && ['갑','을'].includes(todayStem))) {
-            message = `나의 기운(${userStem})이 오늘의 일진(${todayGanji.fullName})에게 에너지를 발산하는 흐름입니다. 내 역량을 밖으로 펼치기 좋으나 체력 안배가 필요해요!`;
+            message = `나의 본원(${userStem})이 오늘의 일진(${todayGanji.fullName})으로 분출되는 활발한 흐름입니다. 창의적인 아이디어를 내거나 표현하기 좋으나 체력 소모에 유의하세요.`;
+        } else if ((['병','정'].includes(userStem) && ['갑','을'].includes(todayStem)) ||
+                   (['무','기'].includes(userStem) && ['병','정'].includes(todayStem)) ||
+                   (['경','신'].includes(userStem) && ['무','기'].includes(todayStem)) ||
+                   (['임','계'].includes(userStem) && ['경','신'].includes(todayStem)) ||
+                   (['갑','을'].includes(userStem) && ['임','계'].includes(todayStem))) {
+            message = `오늘의 일진(${todayGanji.fullName})이 나의 기운(${userStem})을 뒷받침해 주는 충전의 날입니다. 주변의 도움을 받거나 학습, 휴식을 취하기에 유리합니다.`;
         } else {
-            message = `오늘의 일진(${todayGanji.fullName})이 나의 성향(${userStem})과 미묘한 긴장을 만드는 흐름입니다. 오전보다는 차분하게 오후 시간대에 결정을 내리는 것이 유리해요.`;
+            message = `오늘의 일진(${todayGanji.fullName})과 나의 일간(${userStem}) 사이에 가벼운 긴장과 변동성이 형성되는 날입니다. 중요한 결정은 서두르지 말고 오후에 차분히 점검하세요.`;
         }
 
-        // 중복 방지 메모리 필터 로직
+        // 최근 8회 중복 방지 필터
         let history = [];
         try {
             history = JSON.parse(safeStorage.getItem('prescription_history') || '[]');
+            if (!Array.isArray(history)) history = [];
         } catch (e) {
             history = [];
         }
@@ -293,13 +315,47 @@
         }
         safeStorage.setItem('prescription_history', JSON.stringify(history));
 
-        document.getElementById('companion-speech').innerText = `생일 데이터를 바탕으로 오늘의 맞춤 에너지를 분석해 두었어요!`;
-        document.getElementById('briefing-text').innerHTML = `
-            <div class="tag">🍀 나의 일간: ${userStem}일 / 오늘의 일진: ${todayGanji.fullName}</div><br>
-            <strong>에너지 리포트:</strong> ${message}<br><br>
-            <strong>🎁 오늘의 맞춤 액땜 처방전:</strong><br><span style="color: #0056b3; display:inline-block; margin-top:4px;">${selectedPrescription}</span>
-        `;
+        const speechEl = document.getElementById('companion-speech');
+        if (speechEl) {
+            speechEl.innerText = `${userStem}일간 맞춤 에너지 분석을 완료했어요!`;
+        }
+
+        const briefingEl = document.getElementById('briefing-text');
+        if (briefingEl) {
+            briefingEl.innerHTML = `
+                <div class="tag">🍀 나의 일간: ${userStem}일 / 오늘의 일진: ${todayGanji.fullName}</div><br>
+                <strong>에너지 리포트:</strong> ${message}<br><br>
+                <strong>🎁 오늘의 맞춤 액땜 처방전:</strong><br><span style="color: #0056b3; display:inline-block; margin-top:4px;">${selectedPrescription}</span>
+            `;
+        }
     }
+
+    function handleFeedback(type) {
+        const resultEl = document.getElementById('feedback-result');
+        const speechEl = document.getElementById('companion-speech');
+        
+        if (type === 'yes') {
+            if (resultEl) resultEl.innerText = "😅 우주 탓 디펜스 발동 완료! 내일의 흐름에 유쾌하게 반영될게요.";
+            if (speechEl) speechEl.innerText = "오늘도 수고 많으셨어요! 내일은 훨씬 산뜻한 타이밍이 될 거예요.";
+        } else {
+            if (resultEl) resultEl.innerText = "✨ 평온하고 완벽한 타이밍의 하루였군요! 멋져요.";
+            if (speechEl) speechEl.innerText = "평온한 하루를 보내셨다니 저도 기분이 좋네요!";
+        }
+    }
+
+    // 자동 로드 처리
+    window.addEventListener('DOMContentLoaded', function() {
+        const savedBirth = safeStorage.getItem('user_birth');
+        if (savedBirth) {
+            const birthInput = document.getElementById('birth-date');
+            if (birthInput) birthInput.value = savedBirth;
+            
+            document.getElementById('onboarding-section').classList.add('hidden');
+            document.getElementById('main-section').classList.remove('hidden');
+            generateUniqueBriefing(savedBirth);
+        }
+    });
+</script>
 
 </body>
 </html>
