@@ -247,6 +247,24 @@
         const userGanji = getGanji(birthDate);
         const todayGanji = getGanji(new Date());
 
+        const userStem = userGanji.stem;
+        const todayStem = todayGanji.stem;
+
+        // 나의 일간과 오늘의 일진 조합에 따른 맞춤형 에너지 메시지 풀
+        let message = "";
+        if (userStem === todayStem) {
+            message = `나의 일간(${userStem})과 오늘의 기운(${todayGanji.fullName})이 강력하게 겹치는 날입니다! 주도적으로 일을 밀어붙이기 좋지만 고집이 강해질 수 있으니 여유를 가져보세요.`;
+        } else if ((['갑','을'].includes(userStem) && ['병','정'].includes(todayStem)) ||
+                   (['병','정'].includes(userStem) && ['무','기'].includes(todayStem)) ||
+                   (['무','기'].includes(userStem) && ['경','신'].includes(todayStem)) ||
+                   (['경','신'].includes(userStem) && ['임','계'].includes(todayStem)) ||
+                   (['임','계'].includes(userStem) && ['갑','을'].includes(todayStem))) {
+            message = `나의 기운(${userStem})이 오늘의 일진(${todayGanji.fullName})에게 에너지를 발산하는 흐름입니다. 내 역량을 밖으로 펼치기 좋으나 체력 안배가 필요해요!`;
+        } else {
+            message = `오늘의 일진(${todayGanji.fullName})이 나의 성향(${userStem})과 미묘한 긴장을 만드는 흐름입니다. 오전보다는 차분하게 오후 시간대에 결정을 내리는 것이 유리해요.`;
+        }
+
+        // 중복 방지 메모리 필터 로직
         let history = [];
         try {
             history = JSON.parse(safeStorage.getItem('prescription_history') || '[]');
@@ -275,27 +293,13 @@
         }
         safeStorage.setItem('prescription_history', JSON.stringify(history));
 
-        let message = `오늘의 일진은 [${todayGanji.fullName}]입니다. 외부 변동성과 기운이 가볍게 교차하는 흐름이에요!`;
-
-        document.getElementById('companion-speech').innerText = `오늘 에너지를 완벽하게 분석해 두었어요. 가볍게 훑어보세요!`;
+        document.getElementById('companion-speech').innerText = `생일 데이터를 바탕으로 오늘의 맞춤 에너지를 분석해 두었어요!`;
         document.getElementById('briefing-text').innerHTML = `
-            <div class="tag">🍀 나의 일간: ${userGanji.stem}일 / 오늘의 일진: ${todayGanji.fullName}</div><br>
+            <div class="tag">🍀 나의 일간: ${userStem}일 / 오늘의 일진: ${todayGanji.fullName}</div><br>
             <strong>에너지 리포트:</strong> ${message}<br><br>
             <strong>🎁 오늘의 맞춤 액땜 처방전:</strong><br><span style="color: #0056b3; display:inline-block; margin-top:4px;">${selectedPrescription}</span>
         `;
     }
-
-    function handleFeedback(type) {
-        const resultEl = document.getElementById('feedback-result');
-        if(type === 'yes') {
-            resultEl.innerText = "😅 우주 탓 디펜스 발동 완료! 내일의 흐름에 유쾌하게 반영될게요.";
-            document.getElementById('companion-speech').innerText = "고생 많았어요! 내일은 더 산뜻할 거예요.";
-        } else {
-            resultEl.innerText = "✨ 평온하고 완벽한 타이밍의 하루였군요! 멋져요.";
-            document.getElementById('companion-speech').innerText = "평온한 하루였다니 저도 기분이 좋네요!";
-        }
-    }
-</script>
 
 </body>
 </html>
