@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TIMING NOTE</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f7f7f9;
+            color: #1a1a1a;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .app-container {
+            width: 100%;
+            max-width: 380px;
+            background: #ffffff;
+            border-radius: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+            padding: 24px;
+            box-sizing: border-box;
+            border: 1px solid #eaeaea;
+        }
+        h1 {
+            font-size: 22px;
+            text-align: center;
+            margin-top: 0;
+            margin-bottom: 20px;
+            letter-spacing: -0.5px;
+            font-weight: 800;
+        }
+        .card {
+            background: #fafafc;
+            border: 1px solid #f0f0f3;
+            border-radius: 18px;
+            padding: 18px;
+            margin-bottom: 16px;
+        }
+        .card-title {
+            font-weight: 700;
+            font-size: 13px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            color: #666666;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .card-content {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333333;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #1a1a1a;
+            color: #ffffff;
+            border: none;
+            border-radius: 14px;
+            font-weight: 700;
+            font-size: 14px;
+            cursor: pointer;
+            margin-top: 10px;
+            transition: background 0.2s, transform 0.1s;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:hover {
+            background: #333333;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 12px;
+            box-sizing: border-box;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            font-size: 14px;
+            background: #fff;
+            text-align: center;
+        }
+        .hidden { display: none; }
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: #f0f0f3;
+            padding: 4px 10px;
+            font-size: 12px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #444;
+        }
+        .feedback-btns {
+            display: flex;
+            gap: 8px;
+        }
+        .feedback-btns button {
+            margin-top: 6px;
+            font-size: 13px;
+            padding: 10px;
+            background: #f0f0f3;
+            color: #1a1a1a;
+        }
+        .feedback-btns button:hover {
+            background: #e2e2e6;
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <h1>✨ Timing Note</h1>
+    
+    <!-- 온보딩 섹션 -->
+    <div id="onboarding-section" class="card">
+        <div class="card-title">🐾 Profile Setup</div>
+        <div class="card-content">
+            <label style="font-size: 12px; color: #777; display:block; margin-bottom:6px;">생년월일을 선택해주세요</label>
+            <input type="date" id="birth-date" value="1977-03-24">
+            <button onclick="initApp()">타이밍 엔진 구동하기</button>
+        </div>
+    </div>
+
+    <!-- 메인 대시보드 -->
+    <div id="main-section" class="hidden">
+        <!-- 컴패니언 아바타 말풍선 카드 -->
+        <div class="card" style="display: flex; align-items: center; gap: 14px;">
+            <div style="width: 48px; height: 48px; min-width: 48px; border: 2px solid #1a1a1a; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; background: #ffffff;">🍀</div>
+            <div style="flex: 1;">
+                <div style="font-size: 11px; font-weight: 700; color: #666; margin-bottom: 2px;">타이밍 메이트</div>
+                <div style="font-size: 13px; line-height: 1.4;" id="companion-speech">
+                    환영해요! 오늘의 타이밍 브리핑을 준비했어요.
+                </div>
+            </div>
+        </div>
+
+        <!-- 모닝 브리핑 카드 -->
+        <div class="card">
+            <div class="card-title">☀️ Today's Briefing</div>
+            <div class="card-content" id="briefing-text"></div>
+        </div>
+
+        <!-- 저녁 디브리프 카드 -->
+        <div class="card">
+            <div class="card-title">🌙 Evening Check-in</div>
+            <div class="card-content">
+                <p style="margin-top: 0; font-size: 13px;">오늘 예보처럼 은근히 바쁘거나 뜻대로 안 풀린 순간이 있었나요?</p>
+                <div class="feedback-btns">
+                    <button onclick="handleFeedback('yes')">맞아요, 변동이 있었어요 😅</button>
+                    <button onclick="handleFeedback('no')">아니요, 평온했어요 ✨</button>
+                </div>
+                <p id="feedback-result" style="margin-top: 12px; font-size: 13px; font-weight: 600; color: #555;"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const stems = ['갑', '을', '병', '정', '무', '기', '경', '신', '임', '계'];
+    const branches = ['자', '축', '인', '묘', '진', '사', '오', '미', '신', '유', '술', '해'];
+
+    const wackyPrescriptions = [
+        "편의점 구석의 가장 안 팔릴 것 같은 초코바를 사서 한 입 먹고 남은 건 우주에 기부하기 🍫",
+        "방 안에서 뒤로 다섯 걸음 걸어가며 오늘의 재수를 후진으로 밀어내기 🚶‍♂️",
+        "스마트폰 배경화면을 기본 이미지로 1시간 동안 바꿔놓고 디지털 자연인 되기 🌿",
+        "지나가던 비둘기가 내 기운을 훔쳐갔다고 마음속으로 가볍게 억지 부리기 🐦",
+        "차가운 보리차를 한 번에 원샷하고 내 안의 불순물이 전부 증발했다고 선언하기 🧊",
+        "오늘의 모든 꼬임은 지구 자기장 탓으로 돌리고 냉동실 아이스크림 영접하기 🍦",
+        "스마트폰에서 1년 동안 안 쓴 앱 하나를 삭제하며 짜증 한 조각 함께 영구 삭제하기 🗑️",
+        "자리에서 벌떡 일어나 제자리에서 한 바퀴 돌며 공간의 흐름을 강제로 비틀기 💫",
+        "포장이 가장 요란한 신제품 과자를 사서 고개 가젓기로 액운 쫓기 🍿",
+        "오늘 내 왼쪽 어깨를 강하게 당기는 달의 인력 탓을 하며 당 충전하기 🌕",
+        "책상 위에 있는 물건 위치를 좌우 반전시키며 시공간 좌표를 교란시키기 📐",
+        "거울을 보며 '오늘 내 일진은 서쪽으로 구부러졌다'고 당당하게 속삭이기 🪞"
+    ];
+
+    function parseLocalDate(dateStr) {
+        const parts = dateStr.split('-');
+        if (parts.length !== 3) return new Date();
+        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    }
+
+    function getGanji(date) {
+        const baseDate = new Date(1900, 0, 1);
+        const diffTime = date.getTime() - baseDate.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        const startIndex = 10;
+        const index = (startIndex + diffDays) % 60;
+        return {
+            stem: stems[((index % 10) + 10) % 10],
+            branch: branches[((index % 12) + 12) % 12],
+            fullName: stems[((index % 10) + 10) % 10] + branches[((index % 12) + 12) % 12]
+        };
+    }
+
+    const safeStorage = {
+        getItem(key) {
+            try { return localStorage.getItem(key); } catch (e) { return null; }
+        },
+        setItem(key, value) {
+            try { localStorage.setItem(key, value); } catch (e) {}
+        }
+    };
+
+    // 페이지 로드 시 기존 저장된 생년월일이 있으면 자동 세팅
+    window.onload = function() {
+        const savedBirth = safeStorage.getItem('user_birth');
+        if (savedBirth) {
+            document.getElementById('birth-date').value = savedBirth;
+        }
+    };
+
+    function initApp() {
+        const birthDateStr = document.getElementById('birth-date').value;
+        if(!birthDateStr) {
+            alert('생년월일을 입력해주세요.');
+            return;
+        }
+
+        const birthDate = parseLocalDate(birthDateStr);
+        const today = new Date();
+        
+        if (birthDate > today) {
+            alert('생년월일은 오늘보다 미래일 수 없습니다.');
+            return;
+        }
+        
+        safeStorage.setItem('user_birth', birthDateStr);
+        document.getElementById('onboarding-section').classList.add('hidden');
+        document.getElementById('main-section').classList.remove('hidden');
+        
+        generateUniqueBriefing(birthDateStr);
+    }
+
+    function generateUniqueBriefing(birthStr) {
+        const birthDate = parseLocalDate(birthStr);
+        const userGanji = getGanji(birthDate);
+        const todayGanji = getGanji(new Date());
+
+        let history = [];
+        try {
+            history = JSON.parse(safeStorage.getItem('prescription_history') || '[]');
+        } catch (e) {
+            history = [];
+        }
+        
+        let availableIndices = [];
+        for (let i = 0; i < wackyPrescriptions.length; i++) {
+            if (!history.includes(i)) {
+                availableIndices.push(i);
+            }
+        }
+
+        if (availableIndices.length === 0) {
+            history = [];
+            availableIndices = wackyPrescriptions.map((_, i) => i);
+        }
+
+        const randomIndex = availableIndices[Math.floor(Math.random() * availableIndices.length)];
+        const selectedPrescription = wackyPrescriptions[randomIndex];
+
+        history.push(randomIndex);
+        if (history.length > 8) {
+            history.shift();
+        }
+        safeStorage.setItem('prescription_history', JSON.stringify(history));
+
+        let message = `오늘의 일진은 [${todayGanji.fullName}]입니다. 외부 변동성과 기운이 가볍게 교차하는 흐름이에요!`;
+
+        document.getElementById('companion-speech').innerText = `오늘 에너지를 완벽하게 분석해 두었어요. 가볍게 훑어보세요!`;
+        document.getElementById('briefing-text').innerHTML = `
+            <div class="tag">🍀 나의 일간: ${userGanji.stem}일 / 오늘의 일진: ${todayGanji.fullName}</div><br>
+            <strong>에너지 리포트:</strong> ${message}<br><br>
+            <strong>🎁 오늘의 맞춤 액땜 처방전:</strong><br><span style="color: #0056b3; display:inline-block; margin-top:4px;">${selectedPrescription}</span>
+        `;
+    }
+
+    function handleFeedback(type) {
+        const resultEl = document.getElementById('feedback-result');
+        if(type === 'yes') {
+            resultEl.innerText = "😅 우주 탓 디펜스 발동 완료! 내일의 흐름에 유쾌하게 반영될게요.";
+            document.getElementById('companion-speech').innerText = "고생 많았어요! 내일은 더 산뜻할 거예요.";
+        } else {
+            resultEl.innerText = "✨ 평온하고 완벽한 타이밍의 하루였군요! 멋져요.";
+            document.getElementById('companion-speech').innerText = "평온한 하루였다니 저도 기분이 좋네요!";
+        }
+    }
+</script>
+
+</body>
+</html>
