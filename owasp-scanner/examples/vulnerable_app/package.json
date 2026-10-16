@@ -1,0 +1,8 @@
+{
+  "name": "vulnerable-demo",
+  "dependencies": {
+    "express": "*",
+    "lodash": "4.17.15",
+    "my-lib": "git+https://github.com/someone/my-lib.git"
+  }
+}
