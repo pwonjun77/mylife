@@ -46,11 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("code", parents=[common], help="소스코드 정적 점검 (SAST)")
     c.add_argument("path", help="점검할 디렉터리 또는 파일")
     c.add_argument("--exclude", action="append", default=[], help="제외할 디렉터리 이름 (반복 지정 가능)")
-    c.add_argument("--with-deps", action="store_true", help="의존성 점검(A06)도 함께 수행")
+    c.add_argument("--with-deps", action="store_true", help="의존성·공급망 점검도 함께 수행")
     c.add_argument("--osv", action="store_true", help="의존성 점검 시 OSV.dev 취약점 DB 조회 (네트워크 필요)")
 
-    d = sub.add_parser("deps", parents=[common], help="의존성 점검 (A06, requirements.txt / package.json)")
+    d = sub.add_parser("deps", parents=[common], help="의존성·공급망 점검 (requirements.txt / package.json)")
     d.add_argument("path", help="점검할 디렉터리 또는 파일")
+    d.add_argument("--exclude", action="append", default=[], help="제외할 디렉터리 이름 (반복 지정 가능)")
     d.add_argument("--osv", action="store_true", help="OSV.dev 취약점 DB 조회 (네트워크 필요)")
 
     w = sub.add_parser("web", parents=[common], help="웹 애플리케이션 비파괴 점검 (DAST, passive)")
@@ -125,13 +126,13 @@ def main(argv: list[str] | None = None) -> int:
             findings, count = scan_path(args.path, set(args.exclude))
             meta.update(target=str(Path(args.path).resolve()), files_scanned=count)
             if args.with_deps:
-                dep_findings, deps, err = scan_dependencies(args.path, args.osv)
+                dep_findings, deps, err = scan_dependencies(args.path, args.osv, exclude_dirs=set(args.exclude))
                 findings += dep_findings
                 meta["notes"].append(f"의존성 {len(deps)}개 확인")
                 if err:
                     meta["notes"].append(err)
         elif args.command == "deps":
-            findings, deps, err = scan_dependencies(args.path, args.osv)
+            findings, deps, err = scan_dependencies(args.path, args.osv, exclude_dirs=set(args.exclude))
             meta.update(target=str(Path(args.path).resolve()), dependencies=len(deps))
             meta["notes"].append(f"의존성 {len(deps)}개 확인" + ("" if args.osv else " (OSV 조회는 --osv 옵션 사용)"))
             if err:

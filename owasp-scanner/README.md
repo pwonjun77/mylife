@@ -3,6 +3,8 @@
 **OWASP Top 10:2025**(최신판, 기본값)와 **OWASP Top 10:2021** 기준으로 취약점을 점검하는 도구입니다.
 Python 3.10 이상의 표준 라이브러리만 사용하므로 따로 설치할 패키지가 없습니다.
 
+> 📘 처음 사용하신다면 설치부터 결과 해석, 문제 해결까지 담은 **[초보자용 사용 설명서(GUIDE.md)](GUIDE.md)** 를 먼저 읽어 보세요.
+
 | 모드 | 설명 | 주요 점검 항목 |
 |------|------|----------------|
 | `code` | 소스코드 정적 점검 (SAST) | SQL/명령/NoSQL 인젝션, XSS, 경로 조작, SSRF, 역직렬화, 취약한 암호화, 하드코딩된 비밀정보, JWT 검증 누락, 디버그 모드, 예외 처리 미흡(fail-open, 예외 무시), `curl \| sh`·신뢰할 수 없는 패키지 저장소 등 |
@@ -67,7 +69,7 @@ python3 -m owasp_scanner rules
 
 - 줄 끝에 `# nosec` 또는 `// owasp-ignore` 주석을 달면 그 줄은 건너뜁니다.
 - 파일 앞 5줄 안에 `owasp-ignore-file`이 있으면 파일 전체를 건너뜁니다.
-- 기본으로 제외하는 디렉터리는 `node_modules`, `.git`, `venv`, `dist`, `build` 등이며, `--exclude DIR`로 더 지정할 수 있습니다.
+- 기본으로 제외하는 디렉터리는 `node_modules`, `.git`, `venv`, `dist`, `build` 등이며, `--exclude DIR`로 더 지정할 수 있습니다(`code`, `deps` 모두 적용).
 
 ## 데모
 
@@ -83,7 +85,7 @@ python3 -m owasp_scanner code examples/vulnerable_app --with-deps
 
 ```yaml
 - name: OWASP 정적 점검
-  run: PYTHONPATH=owasp-scanner python3 -m owasp_scanner code . --with-deps --fail-on high
+  run: PYTHONPATH=owasp-scanner python3 -m owasp_scanner code . --exclude examples --with-deps --fail-on high
 ```
 
 ## 테스트
