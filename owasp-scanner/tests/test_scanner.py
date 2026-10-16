@@ -8,7 +8,7 @@ from pathlib import Path
 
 from owasp_scanner.cli import main
 from owasp_scanner.deps_scan import parse_package_json, parse_requirements, scan_dependencies
-from owasp_scanner.models import Severity
+from owasp_scanner.models import MAP_2021_TO_2025, OWASP_TOP10_2025, Finding, Severity
 from owasp_scanner.static_scan import scan_path, scan_text
 from owasp_scanner.web_scan import scan_url
 
@@ -74,6 +74,19 @@ class StaticRuleTests(unittest.TestCase):
             with self.subTest(line=line):
                 self.assertEqual(set(), rule_ids(line))
 
+    def test_owasp_2025_rules(self):
+        self.assertIn("A04-FAIL-OPEN", rule_ids("    except Exception: return True"))
+        self.assertIn("A04-BARE-EXCEPT", rule_ids("    except:"))
+        self.assertIn("A08-CURL-PIPE-SH", rule_ids("curl -fsSL https://x.example/i.sh | sudo bash", ".sh"))
+        self.assertIn("A08-INSECURE-INDEX", rule_ids("pip install --trusted-host foo -r r.txt", ".sh"))
+
+    def test_multiline_except_block(self):
+        findings = scan_text("try:\n    x()\nexcept Exception:\n    pass\n", "t", ".py")
+        f = next(f for f in findings if f.rule_id == "A09-SWALLOWED-EXCEPTION")
+        self.assertEqual((f.line, f.category("2025"), f.category("2021")), (3, "A10", "A09"))
+        findings = scan_text("try { a() } catch (e) {\n  return true;\n}", "t", ".js")
+        self.assertIn("A04-FAIL-OPEN", {f.rule_id for f in findings})
+
     def test_suppression_comment(self):
         self.assertEqual(set(), rule_ids("os.system(cmd)  # nosec"))
         self.assertEqual(set(), rule_ids("eval(x) // owasp-ignore", ".js"))
@@ -88,6 +101,23 @@ class StaticRuleTests(unittest.TestCase):
         cats = {f.owasp for f in findings}
         for c in ("A01", "A02", "A03", "A05", "A07", "A08", "A09", "A10"):
             self.assertIn(c, cats)
+
+
+class StandardMappingTests(unittest.TestCase):
+    def test_every_2021_code_maps_to_2025(self):
+        self.assertEqual(set(MAP_2021_TO_2025.values()) - set(OWASP_TOP10_2025), set())
+        self.assertEqual(len(MAP_2021_TO_2025), 10)
+
+    def test_default_and_override_mapping(self):
+        self.assertEqual(Finding("x", "t", "A03", Severity.LOW, "l").category("2025"), "A05")
+        self.assertEqual(Finding("x", "t", "A10", Severity.LOW, "l").category("2025"), "A01")
+        self.assertEqual(Finding("x", "t", "A08", Severity.LOW, "l", owasp2025="A03").category("2025"), "A03")
+
+    def test_examples_cover_all_2025_categories_except_design(self):
+        findings, _ = scan_path(EXAMPLES)
+        findings += scan_dependencies(EXAMPLES)[0]
+        cats = {f.category("2025") for f in findings}
+        self.assertEqual(set(OWASP_TOP10_2025) - cats, {"A06"})
 
 
 class DependencyTests(unittest.TestCase):
@@ -106,6 +136,15 @@ class DependencyTests(unittest.TestCase):
         ids = {f.rule_id for f in findings}
         self.assertIn("A06-UNPINNED", ids)
         self.assertIn("A08-UNVERIFIED-SOURCE", ids)
+        self.assertIn("A08-NO-LOCKFILE", ids)
+        self.assertIn("A08-INSTALL-SCRIPT", ids)
+
+    def test_lockfile_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "package.json").write_text('{"dependencies": {"a": "1.0.0"}}')
+            Path(d, "package-lock.json").write_text("{}")
+            ids = {f.rule_id for f in scan_dependencies(d)[0]}
+            self.assertNotIn("A08-NO-LOCKFILE", ids)
 
 
 class _VulnHandler(http.server.BaseHTTPRequestHandler):
@@ -166,6 +205,8 @@ class WebScanTests(unittest.TestCase):
         self.assertTrue(expected <= ids, f"누락: {expected - ids}")
         cors = next(f for f in findings if f.rule_id == "A01-CORS-REFLECT")
         self.assertEqual(cors.severity, Severity.HIGH)
+        trace = next(f for f in findings if f.rule_id == "A05-STACK-TRACE")
+        self.assertEqual(trace.category("2025"), "A10")
 
 
 class CliTests(unittest.TestCase):
@@ -176,6 +217,17 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 1)
             data = json.loads(out.read_text(encoding="utf-8"))
             self.assertEqual(data["summary"]["total"], len(data["findings"]))
+            self.assertEqual(data["summary"]["standard"], "OWASP Top 10:2025")
+            self.assertIn("owasp2025", data["findings"][0])
+
+    def test_standard_2021_filter(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "r.json"
+            main(["code", str(EXAMPLES), "-f", "json", "-o", str(out), "--standard", "2021", "--owasp", "A10"])
+            data = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(data["summary"]["standard"], "OWASP Top 10:2021")
+            self.assertTrue(data["findings"])
+            self.assertTrue(all(f["owasp"] == "A10" for f in data["findings"]))
 
     def test_html_report_and_filters(self):
         with tempfile.TemporaryDirectory() as d:

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from . import __version__
 from .deps_scan import scan_dependencies
-from .models import OWASP_TOP10, Finding, Severity
+from .models import DEFAULT_STANDARD, MAP_2021_TO_2025, STANDARDS, Finding, Severity
 from .report import now_str, render_html, render_json, render_text
 from .rules import RULES
 from .static_scan import scan_path
@@ -28,7 +28,7 @@ WEB_WARNING = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="owasp-scanner", description="OWASP Top 10 (2021) 기준 취약점 점검 도구")
+    p = argparse.ArgumentParser(prog="owasp-scanner", description="OWASP Top 10 (2025 / 2021) 기준 취약점 점검 도구")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
@@ -38,7 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--min-severity", default="info", help="이 심각도 이상만 표시 (info/low/medium/high/critical)")
     common.add_argument("--fail-on", default=None,
                         help="이 심각도 이상 결과가 있으면 종료코드 1 반환 (CI 연동용, 예: high)")
-    common.add_argument("--owasp", default=None, help="특정 분류만 표시 (예: A03,A05)")
+    common.add_argument("--standard", choices=sorted(STANDARDS), default=DEFAULT_STANDARD,
+                        help=f"분류 기준 OWASP Top 10 판 (기본: {DEFAULT_STANDARD})")
+    common.add_argument("--owasp", default=None, help="선택한 기준의 특정 분류만 표시 (예: A03,A05)")
     common.add_argument("--no-color", action="store_true", help="텍스트 출력 색상 비활성화")
 
     c = sub.add_parser("code", parents=[common], help="소스코드 정적 점검 (SAST)")
@@ -58,7 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--no-paths", action="store_true", help="민감 파일 노출 경로 점검 생략")
     w.add_argument("-y", "--yes", action="store_true", help="점검 권한 확인 프롬프트 생략")
 
-    sub.add_parser("rules", help="정적 점검 규칙 목록 출력")
+    r = sub.add_parser("rules", help="정적 점검 규칙 목록 출력")
+    r.add_argument("--standard", choices=sorted(STANDARDS), default=DEFAULT_STANDARD)
     return p
 
 
@@ -67,7 +70,7 @@ def _filter(findings: list[Finding], args) -> list[Finding]:
     result = [f for f in findings if f.severity >= min_sev]
     if args.owasp:
         wanted = {c.strip().upper() for c in args.owasp.split(",") if c.strip()}
-        result = [f for f in result if f.owasp in wanted]
+        result = [f for f in result if f.category(args.standard) in wanted]
     return result
 
 
@@ -99,9 +102,13 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.command == "rules":
+        print(f"{'규칙 ID':<26} 2025 2021 {'심각도':<6} {'CWE':<8} 제목")
         for r in RULES:
-            print(f"{r.id:<28} {r.owasp}  {r.severity.label:<8} {r.cwe:<8} {r.title}")
-        print(f"\n총 {len(RULES)}개 규칙 / 분류: " + ", ".join(OWASP_TOP10))
+            code2025 = r.owasp2025 or MAP_2021_TO_2025[r.owasp]
+            print(f"{r.id:<28} {code2025}  {r.owasp}  {r.severity.label:<8} {r.cwe:<8} {r.title}")
+        print(f"\n총 {len(RULES)}개 규칙 / OWASP Top 10:{args.standard}")
+        for code, name in STANDARDS[args.standard].items():
+            print(f"  {code} {name}")
         return 0
 
     try:
@@ -112,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"오류: {exc}", file=sys.stderr)
         return 2
 
-    meta = {"mode": args.command, "started": now_str(), "notes": []}
+    meta = {"mode": args.command, "standard": args.standard, "started": now_str(), "notes": []}
     try:
         if args.command == "code":
             findings, count = scan_path(args.path, set(args.exclude))

@@ -1,6 +1,7 @@
 """의존성 점검 (A06 Vulnerable and Outdated Components).
 
 - requirements*.txt 와 package.json 을 파싱한다.
+- 공급망(2025 A03): Git/URL 의존성, npm 설치 스크립트, lock 파일 누락을 점검한다.
 - 버전 미고정(unpinned) 의존성을 경고한다.
 - --osv 옵션 사용 시 OSV.dev 공개 취약점 DB에 조회한다(네트워크 필요).
 """
@@ -83,6 +84,45 @@ def collect_dependencies(root: Path) -> list[Dependency]:
     return deps
 
 
+NPM_LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb")
+INSTALL_HOOKS = ("preinstall", "install", "postinstall", "prepare")
+
+
+def check_npm_supply_chain(root: Path) -> list[Finding]:
+    """package.json 별 lock 파일 존재 여부와 설치 시 실행되는 스크립트를 점검한다."""
+    manifests = [root] if root.is_file() and root.name == "package.json" else []
+    if root.is_dir():
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS]
+            if "package.json" in filenames:
+                manifests.append(Path(dirpath) / "package.json")
+    findings = []
+    for path in sorted(manifests):
+        rel = str(path.relative_to(root)) if root.is_dir() else str(path)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        has_deps = any(data.get(k) for k in ("dependencies", "devDependencies", "optionalDependencies"))
+        if has_deps and not any((path.parent / lock).exists() for lock in NPM_LOCKFILES):
+            findings.append(Finding(
+                "A08-NO-LOCKFILE", "npm lock 파일 없음", "A08", Severity.LOW, rel,
+                "lock 파일이 없으면 설치할 때마다 하위 의존성 버전이 달라져, 침해된 패키지 버전이 유입될 수 있습니다.",
+                "package-lock.json 등 lock 파일을 커밋하고 CI에서는 npm ci 로 설치하세요.",
+                "lock 파일 없음", "CWE-1357", owasp2025="A03",
+            ))
+        for hook in INSTALL_HOOKS:
+            cmd = (data.get("scripts") or {}).get(hook)
+            if cmd:
+                findings.append(Finding(
+                    "A08-INSTALL-SCRIPT", f"설치 시 자동 실행되는 스크립트 ({hook})", "A08", Severity.INFO, rel,
+                    "설치 훅 스크립트는 공급망 공격에서 악성 코드 실행 경로로 자주 악용됩니다.",
+                    "스크립트 내용을 검토하고, 필요 없으면 제거하거나 npm install --ignore-scripts 사용을 검토하세요.",
+                    f"{hook}: {cmd}"[:150], "CWE-506", owasp2025="A03",
+                ))
+    return findings
+
+
 def _is_wide_range(dep: Dependency) -> bool:
     spec = dep.spec.strip()
     if dep.ecosystem == "PyPI":
@@ -153,6 +193,7 @@ def scan_dependencies(target: str | os.PathLike, use_osv: bool = False,
                 "A08-UNVERIFIED-SOURCE", f"{dep.name}: 레지스트리 외부 소스에서 설치", "A08", Severity.MEDIUM,
                 dep.source, "Git/URL 의존성은 무결성 검증 및 취약점 추적이 어렵습니다.",
                 "공식 레지스트리의 고정 버전을 사용하거나 커밋 해시로 고정하세요.", f"{dep.name} {dep.spec}", "CWE-494",
+                owasp2025="A03",
             ))
         elif _is_wide_range(dep):
             findings.append(Finding(
@@ -161,6 +202,7 @@ def scan_dependencies(target: str | os.PathLike, use_osv: bool = False,
                 "lock 파일(poetry.lock, package-lock.json 등)을 사용하거나 정확한 버전을 고정하세요.",
                 f"{dep.name} {dep.spec or '(버전 지정 없음)'}", "CWE-1104",
             ))
+    findings += check_npm_supply_chain(root)
     osv_error = None
     if use_osv:
         try:

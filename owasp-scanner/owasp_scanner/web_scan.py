@@ -141,9 +141,9 @@ class WebScanner:
         self.notes: list[str] = []
 
     def add(self, rule_id, title, owasp, severity, description, recommendation, evidence="", cwe="",
-            location=None):
+            location=None, owasp2025=""):
         self.findings.append(Finding(rule_id, title, owasp, severity, location or self.url,
-                                     description, recommendation, evidence, cwe))
+                                     description, recommendation, evidence, cwe, owasp2025=owasp2025))
 
     # ------------------------------------------------------------
     def run(self) -> list[Finding]:
@@ -414,7 +414,7 @@ class WebScanner:
             self.add("A05-STACK-TRACE", "오류 페이지에 스택 트레이스/내부 정보 노출", "A05", Severity.MEDIUM,
                      "상세 오류 메시지는 내부 경로, 프레임워크, 쿼리 구조를 노출합니다.",
                      "운영 환경에서는 사용자 정의 오류 페이지를 사용하고 상세 오류는 서버 로그에만 기록하세요.",
-                     m.group(0)[:150], "CWE-209", location=probe)
+                     m.group(0)[:150], "CWE-209", location=probe, owasp2025="A10")
         if r.status == 200 and len(r.body) > 0:
             self.notes.append("존재하지 않는 경로에 200 응답 (soft-404) – 경로 노출 점검 결과는 본문 서명으로만 판단")
 

@@ -21,6 +21,8 @@ MAX_LINE_LENGTH = 2000  # 압축(minified)된 긴 줄은 건너뜀
 SUPPRESS_RE = re.compile(r"(#|//|/\*|<!--)\s*(nosec|owasp-ignore)\b", re.I)
 # 파일 앞부분 5줄 안에 이 표시가 있으면 파일 전체를 건너뛴다(규칙 정의 파일 등).
 IGNORE_FILE_RE = re.compile(r"owasp-ignore-file", re.I)
+# 줄 끝이 블록 시작(except ...: / catch (...) {)인 경우 다음 줄과 이어 붙여 검사한다.
+BLOCK_OPEN_RE = re.compile(r"(^\s*except\b[^#]*:|catch\s*(\([^)]*\))?\s*\{)\s*$")
 COMMENT_RE = re.compile(r"^\s*(#|//|\*|/\*|<!--)")
 
 
@@ -28,6 +30,10 @@ def _suffix(path: Path) -> str:
     # ".env", ".env.local" 같은 파일은 .env로 취급
     if path.name.startswith(".env"):
         return ".env"
+    if path.name == "Dockerfile" or path.name.startswith("Dockerfile."):
+        return "Dockerfile"
+    if path.name == ".npmrc":
+        return ".npmrc"
     return path.suffix.lower()
 
 
@@ -47,19 +53,24 @@ def scan_text(text: str, location: str, suffix: str, rules: list[Rule] = RULES) 
     if not applicable or IGNORE_FILE_RE.search("\n".join(text.splitlines()[:5])):
         return []
     findings: list[Finding] = []
-    for lineno, line in enumerate(text.splitlines(), start=1):
+    lines = text.splitlines()
+    for lineno, line in enumerate(lines, start=1):
         if len(line) > MAX_LINE_LENGTH or not line.strip():
             continue
         if SUPPRESS_RE.search(line):
             continue
         is_comment = bool(COMMENT_RE.match(line))
+        target = line
+        if BLOCK_OPEN_RE.search(line) and lineno < len(lines):
+            # 예: "except Exception:" + "pass" -> "except Exception: pass"
+            target = f"{line.rstrip()} {lines[lineno].strip()}"
         for rule in applicable:
             # 주석에 있는 코드 예시는 무시하되, 비밀정보/키는 주석이어도 위험하므로 탐지
             if is_comment and not rule.id.startswith(("A02-HARDCODED", "A02-CLOUD", "A02-PRIVATE")):
                 continue
-            if not rule.pattern.search(line):
+            if not rule.pattern.search(target):
                 continue
-            if rule.exclude and rule.exclude.search(line):
+            if rule.exclude and rule.exclude.search(target):
                 continue
             findings.append(Finding(
                 rule_id=rule.id,
@@ -70,8 +81,9 @@ def scan_text(text: str, location: str, suffix: str, rules: list[Rule] = RULES) 
                 line=lineno,
                 description=rule.description,
                 recommendation=rule.recommendation,
-                evidence=_mask(line.strip())[:200],
+                evidence=_mask(target.strip())[:200],
                 cwe=rule.cwe,
+                owasp2025=rule.owasp2025,
             ))
     return _dedupe(findings)
 

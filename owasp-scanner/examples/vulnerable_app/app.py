@@ -65,5 +65,19 @@ def check_login(user, password):
     return eval(request.args.get("expr"))
 
 
+def is_admin(token):
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["role"] == "admin"
+    except Exception:
+        return True
+
+
+def read_config(path):
+    try:
+        return open(path).read()
+    except:
+        return ""
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", debug=True)

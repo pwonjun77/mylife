@@ -1,5 +1,7 @@
-"""소스코드 정적 점검 규칙 (OWASP Top 10 2021 매핑).  owasp-ignore-file
+"""소스코드 정적 점검 규칙 (OWASP Top 10 2021 / 2025 매핑).  owasp-ignore-file
 
+규칙 ID의 접두어(A01~A10)는 2021 분류 기준이며, 2025 분류는 models.MAP_2021_TO_2025
+또는 규칙별 owasp2025 값으로 결정된다.
 각 규칙은 한 줄 단위 정규식으로 동작하는 경량 패턴 매칭이다.
 오탐/미탐이 있을 수 있으므로 결과는 반드시 사람이 검토해야 한다.
 """
@@ -19,6 +21,7 @@ TEMPLATES = (".html", ".htm", ".j2", ".jinja", ".jinja2", ".ejs", ".hbs")
 CONFIG = (".env", ".ini", ".cfg", ".conf", ".yml", ".yaml", ".json", ".properties", ".toml", ".xml")
 ALL_CODE = PY + JS + JAVA + PHP + (".rb", ".go", ".cs")
 ANY = ALL_CODE + TEMPLATES + CONFIG
+SCRIPTS = (".sh", ".bash", ".ps1", ".yml", ".yaml", ".mk")
 
 
 @dataclass(frozen=True)
@@ -34,6 +37,8 @@ class Rule:
     cwe: str = ""
     # 매칭되더라도 이 패턴이 같은 줄에 있으면 무시(안전한 사용으로 판단)
     exclude: re.Pattern | None = None
+    # 2025 분류를 기본 대응표와 다르게 지정할 때 사용
+    owasp2025: str = ""
 
 
 def _r(pattern: str, flags: int = 0) -> re.Pattern:
@@ -370,7 +375,51 @@ RULES: list[Rule] = [
         ALL_CODE,
         "예외를 조용히 무시하면 공격 시도나 장애를 탐지할 수 없습니다.",
         "예외를 적절히 로깅하고 모니터링 시스템에서 경보를 받을 수 있도록 하세요.",
-        "CWE-778",
+        "CWE-390",
+        owasp2025="A10",
+    ),
+    Rule(
+        "A04-BARE-EXCEPT", "A04", Severity.LOW,
+        "모든 예외를 포괄적으로 잡는 except 절",
+        _r(r"^\s*except\s*:|^\s*except\s+BaseException\b"),
+        PY,
+        "모든 예외(KeyboardInterrupt, SystemExit 포함)를 잡으면 오류가 은폐되고 비정상 상태로 처리가 계속될 수 있습니다.",
+        "처리할 예외 타입을 구체적으로 지정하고, 나머지는 상위로 전파하세요.",
+        "CWE-396",
+        owasp2025="A10",
+    ),
+    Rule(
+        "A04-FAIL-OPEN", "A04", Severity.HIGH,
+        "예외 발생 시 허용(fail-open) 처리",
+        _r(r"(except\b[^:]*:|catch\s*(\([^)]*\))?\s*\{)\s*return\s+(True|true|1)\s*;?\s*\}?\s*$"),
+        ALL_CODE,
+        "오류가 발생했을 때 성공/허용을 반환하면 공격자가 예외를 유발해 인증·검증을 우회할 수 있습니다.",
+        "예외 상황에서는 기본적으로 거부(fail-closed)하고 오류를 기록하세요.",
+        "CWE-636",
+        owasp2025="A10",
+    ),
+
+    # ---------------- 공급망 (2025 A03 Software Supply Chain Failures) ----------------
+    Rule(
+        "A08-CURL-PIPE-SH", "A08", Severity.HIGH,
+        "원격 스크립트를 내려받아 바로 실행 (curl | sh)",
+        _r(r"\b(curl|wget)\b[^|#]*\|\s*(sudo\s+)?(ba|z)?sh\b|iex\s*\(\s*(New-Object\s+Net\.WebClient|iwr|Invoke-WebRequest)", re.I),
+        SCRIPTS + ("Dockerfile",),
+        "검증 없이 원격 스크립트를 실행하면 배포 서버나 CDN이 침해되었을 때 악성 코드가 그대로 실행됩니다.",
+        "스크립트를 내려받은 뒤 체크섬/서명을 검증하고, 버전을 고정해 실행하세요.",
+        "CWE-494",
+        owasp2025="A03",
+    ),
+    Rule(
+        "A08-INSECURE-INDEX", "A08", Severity.MEDIUM,
+        "신뢰할 수 없는 패키지 저장소 설정",
+        _r(r"--trusted-host\b|(--(extra-)?index-url|registry['\"]?)\s*[:= ]\s*['\"]?http://|strict-ssl\s*=?\s*false|"
+           r"npm\s+(install|i)\b.*--unsafe-perm", re.I),
+        SCRIPTS + CONFIG + ("Dockerfile", ".npmrc", ".txt"),
+        "HTTP 저장소나 TLS 검증 해제는 패키지 변조(중간자 공격)와 의존성 혼동 공격에 노출됩니다.",
+        "HTTPS 공식/사내 저장소만 사용하고 해시 검증(pip --require-hashes, lock 파일)을 적용하세요.",
+        "CWE-829",
+        owasp2025="A03",
     ),
 
     # ---------------- A10 Server-Side Request Forgery ----------------
