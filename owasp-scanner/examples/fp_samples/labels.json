@@ -1,0 +1,21 @@
+{
+  "description": "fp_samples 폴더의 정답 라벨. 스캐너가 낸 결과가 실제 취약점(true_positive)인지 오탐(false_positive)인지 사람이 판정한 값입니다.",
+  "labels": [
+    {"location": "views.py", "line": 10, "rule_id": "A02-WEAK-HASH", "expected": "false_positive",
+     "why": "MD5를 캐시 파일 이름을 만드는 데만 쓰며, 비밀번호 저장이나 서명 같은 보안 용도가 아님"},
+    {"location": "views.py", "line": 14, "rule_id": "A03-CMDI", "expected": "false_positive",
+     "why": "shell=True 이지만 명령이 고정 문자열이라 사용자 입력이 들어갈 수 없음"},
+    {"location": "views.py", "line": 19, "rule_id": "A03-CMDI", "expected": "true_positive",
+     "why": "요청 파라미터 tool 이 셸 명령에 그대로 이어 붙음 (예: ?tool=x;id)"},
+    {"location": "views.py", "line": 24, "rule_id": "A03-SQLI", "expected": "false_positive",
+     "why": "입력이 int()로 변환된 뒤 %d 로 들어가므로 SQL 구문을 넣을 수 없음 (파라미터 바인딩 권장은 별개)"},
+    {"location": "views.py", "line": 29, "rule_id": "A03-SQLI", "expected": "true_positive",
+     "why": "요청 파라미터 q 가 f-string으로 SQL에 직접 들어감 (예: ?q=' OR '1'='1)"},
+    {"location": "test_login.py", "line": 4, "rule_id": "A02-HARDCODED-SECRET", "expected": "false_positive",
+     "why": "단위 테스트용 가짜 계정 값으로 실제 자격 증명이 아님"},
+    {"location": "render.js", "line": 4, "rule_id": "A03-XSS-DOM", "expected": "false_positive",
+     "why": "DOMPurify.sanitize 로 정제한 HTML만 넣음"},
+    {"location": "render.js", "line": 9, "rule_id": "A03-XSS-DOM", "expected": "true_positive",
+     "why": "URL 해시(공격자가 링크로 조작 가능)를 정제 없이 innerHTML 에 넣음 (DOM 기반 XSS)"}
+  ]
+}

@@ -64,12 +64,12 @@ def parse_package_json(text: str, source: str) -> list[Dependency]:
     return deps
 
 
-def collect_dependencies(root: Path) -> list[Dependency]:
+def collect_dependencies(root: Path, exclude_dirs: set[str] = frozenset()) -> list[Dependency]:
     deps: list[Dependency] = []
     paths = [root] if root.is_file() else []
     if root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS]
+            dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS | exclude_dirs]
             paths.extend(Path(dirpath) / f for f in filenames)
     for path in sorted(paths):
         rel = str(path.relative_to(root)) if root.is_dir() else str(path)
@@ -88,12 +88,12 @@ NPM_LOCKFILES = ("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-
 INSTALL_HOOKS = ("preinstall", "install", "postinstall", "prepare")
 
 
-def check_npm_supply_chain(root: Path) -> list[Finding]:
+def check_npm_supply_chain(root: Path, exclude_dirs: set[str] = frozenset()) -> list[Finding]:
     """package.json 별 lock 파일 존재 여부와 설치 시 실행되는 스크립트를 점검한다."""
     manifests = [root] if root.is_file() and root.name == "package.json" else []
     if root.is_dir():
         for dirpath, dirnames, filenames in os.walk(root):
-            dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS]
+            dirnames[:] = [d for d in dirnames if d not in DEFAULT_EXCLUDE_DIRS | exclude_dirs]
             if "package.json" in filenames:
                 manifests.append(Path(dirpath) / "package.json")
     findings = []
@@ -179,13 +179,14 @@ def query_osv(deps: list[Dependency], timeout: float = 15.0) -> list[Finding]:
     return findings
 
 
-def scan_dependencies(target: str | os.PathLike, use_osv: bool = False,
-                      timeout: float = 15.0) -> tuple[list[Finding], list[Dependency], str | None]:
+def scan_dependencies(target: str | os.PathLike, use_osv: bool = False, timeout: float = 15.0,
+                      exclude_dirs: set[str] | None = None) -> tuple[list[Finding], list[Dependency], str | None]:
     """(결과, 수집된 의존성, OSV 오류 메시지) 반환."""
     root = Path(target)
     if not root.exists():
         raise FileNotFoundError(f"경로를 찾을 수 없습니다: {root}")
-    deps = collect_dependencies(root)
+    exclude = exclude_dirs or set()
+    deps = collect_dependencies(root, exclude)
     findings: list[Finding] = []
     for dep in deps:
         if dep.spec.startswith(("git", "http", "file:", "github:")) or "://" in dep.spec:
@@ -202,7 +203,7 @@ def scan_dependencies(target: str | os.PathLike, use_osv: bool = False,
                 "lock 파일(poetry.lock, package-lock.json 등)을 사용하거나 정확한 버전을 고정하세요.",
                 f"{dep.name} {dep.spec or '(버전 지정 없음)'}", "CWE-1104",
             ))
-    findings += check_npm_supply_chain(root)
+    findings += check_npm_supply_chain(root, exclude)
     osv_error = None
     if use_osv:
         try:

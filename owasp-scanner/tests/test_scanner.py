@@ -139,6 +139,10 @@ class DependencyTests(unittest.TestCase):
         self.assertIn("A08-NO-LOCKFILE", ids)
         self.assertIn("A08-INSTALL-SCRIPT", ids)
 
+    def test_exclude_dirs(self):
+        findings, deps, _ = scan_dependencies(EXAMPLES.parent, exclude_dirs={"vulnerable_app"})
+        self.assertEqual((findings, deps), ([], []))
+
     def test_lockfile_present(self):
         with tempfile.TemporaryDirectory() as d:
             Path(d, "package.json").write_text('{"dependencies": {"a": "1.0.0"}}')
