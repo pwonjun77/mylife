@@ -7,6 +7,7 @@ import json
 from collections import Counter
 from datetime import datetime
 
+from .ai_review import CONFIDENCE_KO, VERDICT_KO
 from .models import DEFAULT_STANDARD, STANDARDS, Finding, Severity, sort_findings
 
 SEVERITY_KO = {
@@ -35,6 +36,16 @@ def summarize(findings: list[Finding], standard: str = DEFAULT_STANDARD) -> dict
         "by_severity": {s.label: sev.get(s, 0) for s in sorted(Severity, reverse=True)},
         "by_owasp": {k: cat.get(k, 0) for k in STANDARDS[standard]},
     }
+
+
+def _ai_lines(f: Finding) -> tuple[str, str]:
+    """(판정 한 줄, 수정 제안) - AI 검토 결과가 없으면 빈 문자열."""
+    ai = f.extra.get("ai")
+    if not ai:
+        return "", ""
+    verdict = VERDICT_KO.get(ai.get("verdict"), ai.get("verdict", "?"))
+    conf = CONFIDENCE_KO.get(ai.get("confidence"), ai.get("confidence", ""))
+    return f"{verdict} (확신도 {conf}) - {ai.get('reason', '')}", ai.get("fix", "")
 
 
 def _other(standard: str) -> str:
@@ -87,6 +98,11 @@ def render_text(findings: list[Finding], meta: dict, color: bool = False) -> str
             out.append(f"     설명 : {f.description}")
         if f.recommendation:
             out.append(f"     조치 : {f.recommendation}")
+        verdict, fix = _ai_lines(f)
+        if verdict:
+            out.append(f"     AI   : {verdict}")
+        if fix:
+            out.append(f"     AI 제안: {fix}")
     out.append("")
     out.append("※ 본 결과는 자동화된 패턴/비파괴 점검 결과로 오탐·미탐이 있을 수 있으며,")
     out.append("  안전하지 않은 설계(Insecure Design) 등은 설계 검토·모의해킹 등 수동 점검이 필요합니다.")
@@ -131,14 +147,24 @@ def render_html(findings: list[Finding], meta: dict) -> str:
     rows = []
     for f in findings:
         loc = f"{f.location}:{f.line}" if f.line else f.location
+        verdict, fix = _ai_lines(f)
+        badge = (f'<span class="ai">AI: {e(VERDICT_KO.get(f.extra["ai"].get("verdict"), "?"))}</span>'
+                 if f.extra.get("ai") else "")
+        details = [
+            ("분류", f"{e(_category_line(f, standard))} {e(f.cwe)}"),
+            ("규칙", e(f.rule_id)),
+            ("근거", f"<code>{e(f.evidence)}</code>" if f.evidence else ""),
+            ("설명", e(f.description)),
+            ("조치", e(f.recommendation)),
+            ("AI 판정", e(verdict)),
+            ("AI 제안", e(fix)),
+        ]
         rows.append(
             f'<details class="finding"><summary><span class="sev" style="background:{_SEV_COLOR[f.severity]}">'
-            f"{SEVERITY_KO[f.severity]}</span><span class=\"code\">{f.category(standard)}</span> {e(f.title)}"
-            f'<span class="loc">{e(loc)}</span></summary>'
-            f"<dl><dt>분류</dt><dd>{e(_category_line(f, standard))} {e(f.cwe)}</dd>"
-            f"<dt>규칙</dt><dd>{e(f.rule_id)}</dd>"
-            + (f"<dt>근거</dt><dd><code>{e(f.evidence)}</code></dd>" if f.evidence else "")
-            + f"<dt>설명</dt><dd>{e(f.description)}</dd><dt>조치</dt><dd>{e(f.recommendation)}</dd></dl></details>"
+            f'{SEVERITY_KO[f.severity]}</span><span class="code">{f.category(standard)}</span> {e(f.title)}'
+            f'{badge}<span class="loc">{e(loc)}</span></summary><dl>'
+            + "".join(f"<dt>{k}</dt><dd>{v}</dd>" for k, v in details if v)
+            + "</dl></details>"
         )
     notes = "".join(f"<li>{e(n)}</li>" for n in meta.get("notes", []))
     return f"""<!DOCTYPE html>
@@ -157,6 +183,7 @@ td{{padding:6px 10px;border-bottom:1px solid var(--line)}} .num{{text-align:righ
 .bar{{height:8px;background:#5c6bc0;border-radius:4px;min-width:2px}} .code{{font-family:monospace;font-weight:700}}
 .finding{{background:var(--card);border-radius:10px;margin:8px 0;padding:10px 14px}}
 summary{{cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+.ai{{border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px;color:var(--muted)}}
 .sev{{color:#fff;border-radius:6px;padding:2px 8px;font-size:12px}} .loc{{margin-left:auto;color:var(--muted);font-size:12px;word-break:break-all}}
 dl{{display:grid;grid-template-columns:60px 1fr;gap:6px 10px;font-size:14px;margin:12px 0 4px}} dt{{color:var(--muted)}} dd{{margin:0;word-break:break-word}}
 code{{background:var(--bg);padding:2px 4px;border-radius:4px;font-size:12px}} .foot{{color:var(--muted);font-size:12px;margin-top:20px}}

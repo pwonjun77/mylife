@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from enum import IntEnum
 
 
@@ -96,6 +96,14 @@ class Finding:
     @property
     def owasp_name(self) -> str:
         return self.category_name("2021")
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Finding":
+        """JSON 리포트의 findings 항목으로부터 복원한다."""
+        names = {f.name for f in fields(cls)}
+        kwargs = {k: v for k, v in data.items() if k in names}
+        kwargs["severity"] = Severity.parse(kwargs["severity"])
+        return cls(**kwargs)
 
     def to_dict(self) -> dict:
         data = asdict(self)

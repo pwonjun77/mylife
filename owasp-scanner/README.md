@@ -10,6 +10,7 @@ Python 3.10 이상의 표준 라이브러리만 사용하므로 따로 설치할
 | `code` | 소스코드 정적 점검 (SAST) | SQL/명령/NoSQL 인젝션, XSS, 경로 조작, SSRF, 역직렬화, 취약한 암호화, 하드코딩된 비밀정보, JWT 검증 누락, 디버그 모드, 예외 처리 미흡(fail-open, 예외 무시), `curl \| sh`·신뢰할 수 없는 패키지 저장소 등 |
 | `deps` | 의존성·공급망 점검 | `requirements*.txt`, `package.json`의 버전 미고정, Git/URL 의존성, lock 파일 누락, 설치 스크립트(postinstall 등), OSV.dev 알려진 취약점(CVE) |
 | `web`  | 웹 비파괴 점검 (passive DAST) | HTTPS·HSTS·TLS 버전·인증서, 보안 헤더, 쿠키 속성, CORS, HTTP 메서드, 오류 페이지 정보 노출, `.git`/`.env` 등 민감 파일 노출, SRI, 혼합 콘텐츠 |
+| `review` | 저장된 JSON 결과를 Claude로 오탐 검토 | `--ai-review`와 같은 판정을 나중에 수행 |
 
 ## OWASP Top 10:2025 대응표
 
@@ -30,6 +31,39 @@ Python 3.10 이상의 표준 라이브러리만 사용하므로 따로 설치할
 | A10 | Mishandling of Exceptional Conditions (신규) | — | 예외 무시(`except: pass`, 빈 catch), 포괄적 except, 예외 시 허용(fail-open), 오류 페이지 스택 트레이스 노출 |
 
 규칙 ID의 접두어(`A03-SQLI` 등)는 2021 분류 기준의 고정 식별자입니다. 2025 분류는 `python3 -m owasp_scanner rules`에서 확인할 수 있습니다.
+
+## Claude AI 오탐 검토 (선택 기능)
+
+정규식 점검은 오탐이 생길 수밖에 없습니다. `--ai-review`를 붙이면 결과마다 주변 코드(기본 앞뒤 20줄, 비밀값은 `****`로 가림)를 Claude에 보내 **실제 취약점 / 오탐 / 수동 확인 필요** 중 하나로 판정받고, 근거와 수정 제안을 리포트에 함께 표시합니다.
+
+```bash
+pip install anthropic                     # 이 기능에만 필요 (나머지는 표준 라이브러리만 사용)
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+python3 -m owasp_scanner code ./my-project --ai-review              # 판정 추가
+python3 -m owasp_scanner code ./my-project --ai-review --hide-fp    # 오탐 판정은 숨김
+python3 -m owasp_scanner review scan.json -f html -o reviewed.html  # 저장한 JSON 결과를 나중에 검토
+```
+
+- 기본 모델은 `claude-opus-5-5`(`--ai-model`로 변경 가능)이고, JSON 스키마 구조화 출력으로 판정을 받습니다. 안전 분류기가 거절하면 서버 측 fallback(`fallbacks: "default"`)으로 다른 모델이 자동으로 다시 시도합니다.
+- 결과 1건당 API 요청 1회(유료)가 발생합니다. 심각도 높은 순으로 최대 `--ai-max`(기본 30)건까지 검토합니다.
+- 코드 일부가 외부로 전송되므로 실행 전에 확인을 받습니다(`--ai-yes`로 생략할 수 있습니다).
+
+### 오탐 테스트: 정답 라벨과 비교 (`--expected`)
+
+`examples/fp_samples/`에는 실제 취약점 3건과 패턴만 비슷한 안전한 코드 5건이 있고, 정답은 `labels.json`에 있습니다.
+
+```bash
+# 스캐너 정밀도(오탐 비율) 확인 - AI 없이, 무료
+python3 -m owasp_scanner code examples/fp_samples --expected examples/fp_samples/labels.json
+# → 라벨 비교: 스캐너 탐지 8건 중 실제 취약점 3건, 오탐 5건 (정밀도 38%)
+
+# Claude 판정 정확도 확인
+python3 -m owasp_scanner code examples/fp_samples --ai-review --expected examples/fp_samples/labels.json
+# → AI 판정 정확도: N/8, 오탐 5건 중 M건을 오탐으로 판정 (+ 불일치 항목 목록)
+```
+
+내 프로젝트의 결과 일부를 직접 판정해 같은 형식의 라벨 파일을 만들면, 내 코드에서 AI 판정을 얼마나 믿을 수 있는지 측정할 수 있습니다. 자세한 내용은 [GUIDE.md 11장](GUIDE.md#11-오탐-알아내고-처리하기-claude-ai-검토-포함)을 참고하세요.
 
 ## 사용법
 
@@ -93,6 +127,8 @@ python3 -m owasp_scanner code examples/vulnerable_app --with-deps
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+AI 검토 테스트는 실제 API를 호출하지 않습니다. 가짜 클라이언트를 쓰고, `anthropic`이 설치되어 있으면 진짜 SDK에 가짜 HTTP 응답을 넣어 요청 형식까지 검증합니다.
 
 ## 한계 및 주의사항
 
