@@ -1,11 +1,15 @@
 import base64
 import hashlib
 import hmac
+import http.server
 import json
+import threading
 import unittest
 from pathlib import Path
 
 from api_scanner.cli import main
+from api_scanner.discover import discover_spec, scan_base_url
+from api_scanner.live_scan import Client
 from api_scanner.jwt_check import analyze as jwt_analyze
 from api_scanner.jwt_check import forge_none
 from api_scanner.models import Severity, dedupe, sort_findings
@@ -187,6 +191,67 @@ class ReportTests(unittest.TestCase):
         out = render_html(self.findings, self.meta)
         self.assertIn("<!DOCTYPE html>", out)
         self.assertIn("API3", out)
+
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    routes: dict = {}
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, body: bytes, status=200, headers=None):
+        self.send_response(status)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path in self.routes:
+            body, headers = self.routes[self.path]
+            self._send(body, 200, headers)
+        else:
+            self._send(b"not found", 404)
+
+
+class DiscoverTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = EXAMPLE.read_text(encoding="utf-8").encode()
+        _Handler.routes = {
+            "/": (b"<html>api</html>", {"Server": "nginx/1.18.0", "Access-Control-Allow-Origin": "*",
+                                        "Access-Control-Allow-Credentials": "true"}),
+            "/openapi.json": (spec, {"Content-Type": "application/json"}),
+            "/.env": (b"SECRET_KEY=abc123\nDB_PASSWORD=pw", {"Content-Type": "text/plain"}),
+        }
+        cls.server = http.server.HTTPServer(("127.0.0.1", 0), _Handler)
+        cls.base = f"http://127.0.0.1:{cls.server.server_port}"
+        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def test_discovers_spec(self):
+        spec, url = discover_spec(self.base, Client())
+        self.assertIsNotNone(spec)
+        self.assertTrue(url.endswith("/openapi.json"))
+        self.assertIn("API3-SENSITIVE-RESPONSE", rule_ids(scan_spec(spec)))
+
+    def test_base_url_scan_finds_misconfig(self):
+        findings = scan_base_url(self.base, Client())
+        ids = rule_ids(findings)
+        self.assertIn("API8-CORS-WILDCARD-CREDS", ids)   # ACAO:* + credentials:true
+        self.assertIn("API8-VERSION-DISCLOSURE", ids)    # Server: nginx
+        self.assertIn("API8-EXPOSED-PATH", ids)          # /.env 노출
+
+    def test_url_command_discovers_and_scans(self):
+        # 명세를 찾으면 전체 점검이 수행되어 high 결과가 나오므로 fail-on high 는 1
+        self.assertEqual(main(["url", self.base, "-y", "--fail-on", "high"]), 1)
+
+    def test_url_command_no_discover(self):
+        self.assertEqual(main(["url", self.base, "-y", "--no-discover", "--min-severity", "info"]), 0)
 
 
 class CliTests(unittest.TestCase):

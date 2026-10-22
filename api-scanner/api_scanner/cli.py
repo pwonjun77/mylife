@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -56,6 +57,18 @@ def build_parser() -> argparse.ArgumentParser:
     lv.add_argument("--timeout", type=float, default=10.0, help="요청 타임아웃(초)")
     lv.add_argument("--insecure", action="store_true", help="TLS 인증서 검증 생략 (테스트 서버용)")
     lv.add_argument("-y", "--yes", action="store_true", help="점검 권한 확인 프롬프트 생략")
+
+    ur = sub.add_parser("url", parents=[common],
+                        help="명세 없이 주소만으로 점검 (명세 자동 탐색 후, 없으면 설정·노출 점검)")
+    ur.add_argument("target", help="점검 대상 기본 URL (예: https://api.example.com)")
+    ur.add_argument("--token", help="사용자 A의 Bearer 토큰 (명세를 찾으면 live 점검에 사용)")
+    ur.add_argument("--token-b", dest="token_b", help="BOLA 교차 점검용 사용자 B의 토큰")
+    ur.add_argument("--id", dest="sample_id", help="경로 파라미터에 넣을 샘플 값")
+    ur.add_argument("--no-discover", action="store_true", help="명세 자동 탐색을 건너뛰고 설정·노출 점검만 수행")
+    ur.add_argument("--no-paths", action="store_true", help="민감 파일·노출 경로 점검 생략")
+    ur.add_argument("--timeout", type=float, default=10.0, help="요청 타임아웃(초)")
+    ur.add_argument("--insecure", action="store_true", help="TLS 인증서 검증 생략 (테스트 서버용)")
+    ur.add_argument("-y", "--yes", action="store_true", help="점검 권한 확인 프롬프트 생략")
 
     r = sub.add_parser("rules", help="점검 분류(OWASP API Top 10:2023) 목록 출력")
     return p
@@ -170,6 +183,50 @@ def _cmd_live(args) -> int:
     return _exit_code(findings, args)
 
 
+def _cmd_url(args) -> int:
+    from .discover import discover_spec, scan_base_url
+    from .jwt_check import analyze as jwt_analyze
+    from .live_scan import Client, LiveScanner
+    from .spec_scan import scan_spec
+
+    base = args.target if re.match(r"^https?://", args.target, re.I) else "https://" + args.target
+    base = base.rstrip("/")
+    if not args.yes and not _confirm_live(base):
+        print("점검을 취소했습니다.", file=sys.stderr)
+        return 2
+
+    client = Client(timeout=args.timeout, insecure=args.insecure)
+    findings: list[Finding] = []
+    notes: list[str] = []
+    spec = spec_url = None
+    if not args.no_discover:
+        print("명세를 자동 탐색하는 중...", file=sys.stderr)
+        spec, spec_url = discover_spec(base, client)
+
+    if spec is not None:
+        notes.append(f"명세 자동 탐색 성공: {spec_url} (오퍼레이션 {len(spec.operations)}개)")
+        findings += scan_spec(spec)
+        if args.token:
+            scanner = LiveScanner(spec, base, token=args.token, token_b=args.token_b,
+                                  sample_id=args.sample_id, timeout=args.timeout, insecure=args.insecure)
+            findings += scanner.run()
+            notes.append("찾은 명세로 live 비파괴 점검을 수행했습니다(읽기 전용 메서드만).")
+    else:
+        if not args.no_discover:
+            notes.append("표준 경로에서 명세를 찾지 못해 설정·노출 점검만 수행했습니다. "
+                         "권한·로직 점검을 하려면 명세 파일로 'spec'/'live' 모드를 쓰세요.")
+        findings += scan_base_url(base, client, check_paths=not args.no_paths)
+
+    for tok in (args.token, args.token_b):
+        if tok:
+            findings += jwt_analyze(tok)
+
+    findings = _filter(findings, args)
+    meta = {"mode": "url (주소 기반 점검)", "target": base, "started": now_str(), "notes": notes}
+    _emit(findings, meta, args)
+    return _exit_code(findings, args)
+
+
 def _cmd_rules(args) -> int:
     print("OWASP API Security Top 10:2023 분류:\n")
     for code, name in API_TOP10_2023.items():
@@ -180,7 +237,8 @@ def _cmd_rules(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return {"spec": _cmd_spec, "jwt": _cmd_jwt, "live": _cmd_live, "rules": _cmd_rules}[args.command](args)
+        return {"spec": _cmd_spec, "jwt": _cmd_jwt, "live": _cmd_live, "url": _cmd_url,
+                "rules": _cmd_rules}[args.command](args)
     except KeyboardInterrupt:
         print("\n중단되었습니다.", file=sys.stderr)
         return 130

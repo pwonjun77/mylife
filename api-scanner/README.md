@@ -13,7 +13,8 @@ OpenAPI 3.x / Swagger 2.0 **명세 파일만으로** 대부분의 점검이 가�
 |------|------|-----------|
 | `spec` | OpenAPI/Swagger 명세 정적 점검 | ❌ 보내지 않음 |
 | `jwt`  | JWT 토큰 오프라인 분석 (약한 서명키·alg=none·만료·민감 클레임) | ❌ 보내지 않음 |
-| `live` | 실제 서버 비파괴 점검 (읽기 전용 메서드만, **권한 필요**) | ✅ GET/HEAD/OPTIONS만 |
+| `url`  | **명세 없이 주소만으로 점검** (명세 자동 탐색 → 없으면 설정·노출 점검, **권한 필요**) | ✅ GET/HEAD만 |
+| `live` | 실제 서버 비파괴 점검 (명세 기반, 읽기 전용 메서드만, **권한 필요**) | ✅ GET/HEAD/OPTIONS만 |
 | `rules`| 점검 분류(OWASP API Top 10:2023) 목록 출력 | - |
 
 ## 빠른 시작
@@ -55,7 +56,27 @@ python3 -m api_scanner spec ./openapi.json --fail-on high
 
 `python3 -m api_scanner rules` 로 전체 목록을 볼 수 있습니다.
 
-## `live` 모드 (실서버 점검) — 반드시 권한이 있는 대상에만
+## `url` 모드 — 명세 파일이 없고 주소만 있을 때
+
+명세 파일 없이 기준 URL만으로 점검합니다. 동작 순서:
+
+1. **명세 자동 탐색** — `/openapi.json`, `/swagger.json`, `/v3/api-docs`, `/swagger/v1/swagger.json` 등
+   널리 쓰이는 공개 경로를 확인해 명세를 찾습니다. 찾으면 `spec`과 동일한 전체 점검을 수행하고,
+   `--token`을 주면 찾은 명세로 `live` 비파괴 점검까지 이어서 합니다.
+2. **설정·노출 점검(fallback)** — 명세를 찾지 못하면 단일 주소에 대해 확인 가능한 항목만 점검합니다:
+   HTTPS·HSTS·보안 헤더, 와일드카드 CORS+자격증명, 서버 버전 노출(Server/X-Powered-By),
+   흔한 노출 경로(`/.env`, `/.git/config`, `/actuator/env`, `/swagger-ui.html`, `/metrics` 등).
+
+```bash
+python3 -m api_scanner url https://api.example.com                 # 자동 탐색 후 점검
+python3 -m api_scanner url https://api.example.com --token "<JWT>" # 명세를 찾으면 live 까지
+python3 -m api_scanner url https://api.example.com --no-discover   # 설정·노출 점검만
+```
+
+> 주소만 있을 때 명세를 못 찾으면 **설정·노출(API8 중심)** 점검만 됩니다.
+> 권한·로직(API1/API3/API5)까지 점검하려면 명세 파일로 `spec`/`live` 모드를 쓰세요.
+
+## `live` 모드 (명세 기반 실서버 점검) — 반드시 권한이 있는 대상에만
 
 `live` 모드는 명세의 각 경로에 **읽기 전용 메서드(GET/HEAD/OPTIONS)만** 요청하여,
 문서와 실제 구현이 일치하는지 비파괴적으로 확인합니다. 데이터를 생성·수정·삭제하지 않습니다.
