@@ -1,0 +1,174 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Vulnerable Shop API (점검 데모용)",
+    "version": "1.0.0",
+    "description": "api-scanner 데모용으로 일부러 취약점을 심어둔 가상의 API 명세입니다."
+  },
+  "servers": [
+    { "url": "https://api.shop.example.com/v1" },
+    { "url": "https://api.shop.example.com/v2" },
+    { "url": "http://staging-shop.example.com/v1" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" },
+      "basicAuth": { "type": "http", "scheme": "basic" },
+      "legacyKey": { "type": "apiKey", "in": "query", "name": "api_key" }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string" },
+          "password_hash": { "type": "string" },
+          "role": { "type": "string" },
+          "is_admin": { "type": "boolean" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/login": {
+      "post": {
+        "summary": "로그인",
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "access_token": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{id}": {
+      "get": {
+        "summary": "사용자 조회",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/User" }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "사용자 정보 수정",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "role": { "type": "string" },
+                  "is_admin": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "summary": "전체 사용자 목록 (관리자)",
+        "security": [],
+        "parameters": [
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/products/search": {
+      "get": {
+        "summary": "상품 검색",
+        "security": [],
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string" } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/images/fetch": {
+      "post": {
+        "summary": "외부 이미지 가져오기",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": { "image_url": { "type": "string" } }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/checkout": {
+      "post": {
+        "summary": "결제",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "cart_id": { "type": "string" },
+                  "coupon": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/legacy/export": {
+      "get": {
+        "summary": "구버전 내보내기",
+        "deprecated": true,
+        "responses": { "200": { "description": "ok" } }
+      }
+    },
+    "/debug/config": {
+      "get": {
+        "summary": "디버그 설정 확인",
+        "security": [],
+        "responses": { "200": { "description": "ok" } }
+      }
+    }
+  }
+}
