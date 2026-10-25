@@ -105,13 +105,59 @@ def _opener_for(url: str, setting: str):
     return urllib.request.build_opener(handler)
 
 
-def send_webhook(hook: dict, title: str, body: str, events: list[Event], proxy: str = "auto", timeout: float = 10) -> None:
+TEAMS_COLOR = {"down": "Attention", "still_down": "Attention", "recovered": "Good", "warn": "Warning"}
+TEAMS_MAX_EVENTS = 15  # 카드 크기 제한(약 28KB) 대비
+
+
+def _fact(title: str, value) -> dict:
+    return {"title": title, "value": str(value)}
+
+
+def teams_card(title: str, body: str, events: list[Event], link: str = "") -> dict:
+    """Teams 용 Adaptive Card 메시지.
+
+    Teams 'Workflows'(Power Automate) 웹훅과 기존 수신 웹훅(Incoming Webhook) 모두 이 형식을 받는다.
+    """
+    kinds = {e.kind for e in events}
+    color = ("Attention" if kinds & {"down", "still_down"} else "Warning" if "warn" in kinds
+             else "Good" if kinds else "Default")
+    items: list[dict] = [{"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium",
+                          "color": color, "wrap": True}]
+    for e in events[:TEAMS_MAX_EVENTS]:
+        r, p = e.result, e.result.probe
+        facts = [_fact("주소", r.target.display), _fact("내용", r.message)]
+        if r.reason:
+            facts.insert(1, _fact("원인", REASON_KO.get(r.reason, r.reason)))
+        if p.total_ms is not None:
+            facts.append(_fact("응답", f"{p.total_ms:,.0f}ms"))
+        if e.down_since:
+            facts.append(_fact("장애 지속", _duration(e.down_since, r.checked_at)))
+        facts.append(_fact("점검 시각", r.checked_at.replace("T", " ")[:19]))
+        items.append({"type": "Container", "separator": True, "spacing": "Medium", "items": [
+            {"type": "TextBlock", "wrap": True, "weight": "Bolder", "color": TEAMS_COLOR[e.kind],
+             "text": f"{KIND_ICON[e.kind]} [{KIND_KO[e.kind]}] {r.target.key}"},
+            {"type": "FactSet", "facts": facts},
+        ]})
+    if len(events) > TEAMS_MAX_EVENTS:
+        items.append({"type": "TextBlock", "text": f"외 {len(events) - TEAMS_MAX_EVENTS}건", "isSubtle": True})
+    if not events and body:
+        items.append({"type": "TextBlock", "text": body, "wrap": True})
+    card = {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard",
+            "version": "1.4", "body": items, "msteams": {"width": "Full"}}
+    if link:
+        card["actions"] = [{"type": "Action.OpenUrl", "title": "상태 페이지 열기", "url": link}]
+    return {"type": "message", "attachments": [
+        {"contentType": "application/vnd.microsoft.card.adaptive", "contentUrl": None, "content": card}]}
+
+
+def send_webhook(hook: dict, title: str, body: str, events: list[Event], proxy: str = "auto",
+                 timeout: float = 10, link: str = "") -> None:
     kind = hook.get("type", "generic")
     text = f"{title}\n{body}"
-    if kind == "slack":
+    if kind == "teams":
+        payload = teams_card(title, body, events, link)
+    elif kind in ("slack", "googlechat"):
         payload = {"text": text}
-    elif kind in ("teams", "googlechat"):
-        payload = {"text": text.replace("\n", "\n\n") if kind == "teams" else text}
     else:
         payload = {"title": title, "text": body,
                    "events": [{"kind": e.kind, **e.result.to_dict()} for e in events]}
@@ -143,22 +189,40 @@ def send_email(cfg: dict, title: str, body: str, timeout: float = 15) -> None:
         smtp.send_message(msg)
 
 
-def dispatch(events: list[Event], notify_cfg: dict, log=sys.stderr) -> bool:
+def send_all(notify_cfg: dict, title: str, body: str, events: list[Event] | None = None, log=None) -> bool:
     """모든 채널로 발송. 하나라도 성공하면 True. 실패는 기록만 하고 점검은 계속한다."""
-    if not events:
-        return False
-    title, body = build_message(events)
+    log = log or sys.stderr
+    events = events or []
     ok = False
     for hook in notify_cfg.get("webhooks") or []:
         try:
-            send_webhook(hook, title, body, events, notify_cfg.get("proxy", "auto"))
+            send_webhook(hook, title, body, events, notify_cfg.get("proxy", "auto"),
+                         link=notify_cfg.get("status_page_url", ""))
             ok = True
         except Exception as exc:  # 알림 실패가 모니터링 자체를 멈추면 안 됨
-            print(f"[알림 실패] 웹훅 {urlsplit(hook['url']).hostname}: {exc}", file=log)
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [알림 실패] 웹훅 {urlsplit(hook['url']).hostname}: {exc}",
+                  file=log, flush=True)
     if notify_cfg.get("email"):
         try:
             send_email(notify_cfg["email"], title, body)
             ok = True
         except Exception as exc:
-            print(f"[알림 실패] 이메일: {exc}", file=log)
+            print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [알림 실패] 이메일: {exc}", file=log, flush=True)
     return ok
+
+
+def dispatch(events: list[Event], notify_cfg: dict, log=None) -> bool:
+    if not events:
+        return False
+    title, body = build_message(events)
+    return send_all(notify_cfg, title, body, events, log)
+
+
+def summary_text(results: list[CheckResult]) -> str:
+    """하트비트·시작 알림용 현재 상태 요약."""
+    counts = {s: sum(1 for r in results if r.status == s) for s in Status}
+    lines = [f"대상 {len(results)}개 · 정상 {counts[Status.UP]} · 경고 {counts[Status.WARN]} · 장애 {counts[Status.DOWN]}"]
+    for r in results:
+        if r.status != Status.UP:
+            lines.append(f"{KIND_ICON['down' if r.status == Status.DOWN else 'warn']} {r.target.key} - {r.message}")
+    return "\n".join(lines)

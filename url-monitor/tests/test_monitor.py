@@ -353,3 +353,99 @@ class CliTests(Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowsBackgroundTests(Base):
+    """Windows 백그라운드 실행(작업 스케줄러)용 기능: Teams 카드, 환경변수 파일, 로그 파일, 시작/하트비트 알림."""
+
+    def env_file(self):
+        p = self.tmp / "url-monitor.env"
+        p.write_text("﻿# 주석\nURLMON_TEST_TEAMS='%s/teams'\n" % self.base, encoding="utf-8")
+        return str(p)
+
+    def cfg(self):
+        p = self.tmp / "t.json"
+        p.write_text(json.dumps({"defaults": {"retries": 0, "interval_sec": 5},
+                                 "groups": {"웹": [{"name": "정상", "url": self.base + "/ok"},
+                                                   {"name": "오류", "url": self.base + "/500"}]}}), encoding="utf-8")
+        return str(p)
+
+    def tearDown(self):
+        os.environ.pop("URLMON_TEST_TEAMS", None)
+        super().tearDown()
+
+    def test_env_file(self):
+        from url_monitor.config import load_env_file
+        self.assertEqual(load_env_file(self.env_file()), ["URLMON_TEST_TEAMS"])
+        self.assertEqual(os.environ["URLMON_TEST_TEAMS"], self.base + "/teams")
+        bad = self.tmp / "bad.env"
+        bad.write_text("no equals here\n", encoding="utf-8")
+        with self.assertRaises(ConfigError):
+            load_env_file(bad)
+
+    def test_teams_adaptive_card_on_check(self):
+        rc = main(["check", self.cfg(), "--notify", "--env-file", self.env_file(),
+                   "--teams-webhook", "env:URLMON_TEST_TEAMS", "-o", str(self.tmp / "o.txt")])
+        self.assertEqual(rc, 2)
+        self.assertEqual(len(WEBHOOK_CALLS), 1)
+        path, payload = WEBHOOK_CALLS[0]
+        self.assertEqual(path, "/teams")
+        self.assertEqual(payload["type"], "message")
+        att = payload["attachments"][0]
+        self.assertEqual(att["contentType"], "application/vnd.microsoft.card.adaptive")
+        card = att["content"]
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["body"][0]["color"], "Attention")
+        text = json.dumps(card, ensure_ascii=False)
+        self.assertIn("웹/오류", text)
+        self.assertIn("서버 오류 응답", text)
+        self.assertNotIn("웹/정상", text)
+
+    def test_notify_test_command(self):
+        self.assertEqual(main(["notify-test", "--teams-webhook", self.base + "/teams"]), 0)
+        self.assertIn("알림 시험", json.dumps(WEBHOOK_CALLS[0][1], ensure_ascii=False))
+        self.assertEqual(main(["notify-test", self.cfg()]), 3)  # 채널 없음
+        self.assertEqual(main(["notify-test", "--teams-webhook", "env:URLMON_NOT_SET_X"]), 3)
+
+    def test_watch_background_mode(self):
+        log = self.tmp / "logs" / "monitor.log"
+        rc = main(["watch", self.cfg(), "--db", str(self.tmp / "w.db"), "--log-file", str(log),
+                   "--env-file", self.env_file(), "--teams-webhook", "env:URLMON_TEST_TEAMS",
+                   "--keep-awake", "--notify-start", "--heartbeat-hours", "24", "--rounds", "1", "-q"])
+        self.assertEqual(rc, 0)
+        text = log.read_text(encoding="utf-8")
+        self.assertIn("주기 점검 시작", text)
+        self.assertIn("DOWN 웹/오류", text)
+        titles = [json.dumps(p, ensure_ascii=False) for _, p in WEBHOOK_CALLS]
+        self.assertEqual(len(titles), 2)  # 장애 알림 + 모니터링 시작 알림
+        self.assertTrue(any("모니터링 시작" in t and "장애 1" in t for t in titles))
+
+    def test_watch_survives_notify_failure(self):
+        log = self.tmp / "monitor.log"
+        rc = main(["watch", self.cfg(), "--db", str(self.tmp / "w.db"), "--log-file", str(log),
+                   "--teams-webhook", f"http://127.0.0.1:{free_port()}/x", "--rounds", "1", "-q"])
+        self.assertEqual(rc, 0)
+        self.assertIn("[알림 실패]", log.read_text(encoding="utf-8"))
+
+    def test_rotating_log(self):
+        from url_monitor.background import RotatingLog
+        log = RotatingLog(self.tmp / "r.log", max_bytes=100, backups=2)
+        for i in range(30):
+            print(f"줄 {i:02d} 테스트 로그", file=log)
+        log.close()
+        self.assertTrue((self.tmp / "r.log.1").exists())
+        self.assertTrue((self.tmp / "r.log.2").exists())
+        self.assertFalse((self.tmp / "r.log.3").exists())
+        self.assertLess((self.tmp / "r.log").stat().st_size, 200)
+
+    def test_keep_awake_is_noop_off_windows(self):
+        from url_monitor.background import keep_awake
+        if os.name != "nt":
+            self.assertFalse(keep_awake())
+
+    def test_windows_scripts_encoding(self):
+        win = Path(__file__).resolve().parent.parent / "windows"
+        for name in ("install.ps1", "uninstall.ps1", "status.ps1"):
+            raw = (win / name).read_bytes()
+            self.assertTrue(raw.startswith(b"\xef\xbb\xbf"), f"{name}: PowerShell 5.1 용 UTF-8 BOM 필요")
+            self.assertNotIn(b"\n", raw.replace(b"\r\n", b""), f"{name}: CRLF 줄바꿈 필요")

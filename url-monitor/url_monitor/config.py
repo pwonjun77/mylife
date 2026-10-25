@@ -27,7 +27,8 @@ from .models import Target
 DEFAULTS = {f.name: f.default for f in fields(Target) if f.name not in ("name", "group") and not callable(f.default_factory)}
 TARGET_KEYS = {f.name for f in fields(Target)}
 SETTINGS_DEFAULTS = {"workers": 20, "retention_days": 90}
-NOTIFY_KEYS = {"webhooks", "email", "repeat_every_min", "notify_warn", "notify_recovery", "proxy"}
+NOTIFY_KEYS = {"webhooks", "email", "repeat_every_min", "notify_warn", "notify_recovery", "proxy",
+               "notify_start", "heartbeat_hours", "status_page_url"}
 
 INT_KEYS = {"port", "retries", "cert_warn_days", "max_redirects"}
 FLOAT_KEYS = {"warn_response_ms", "timeout_sec", "retry_delay_sec", "interval_sec"}
@@ -51,6 +52,32 @@ class Config:
 
 
 # ---------------------------------------------------------------- 값 변환
+
+def load_env_file(path: str | Path) -> list[str]:
+    """KEY=VALUE 형식 파일을 환경변수로 읽는다(이미 있는 변수는 덮어쓰지 않음). 읽은 키 목록을 돌려준다.
+
+    Windows 작업 스케줄러로 실행하면 사용자 환경변수가 보이지 않으므로,
+    Teams 웹훅 주소 같은 비밀값을 접근 권한을 제한한 파일에 두고 이 함수로 읽는다.
+    """
+    path = Path(path)
+    if not path.is_file():
+        raise ConfigError([f"환경변수 파일이 없습니다: {path}"])
+    keys = []
+    for lineno, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), start=1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("export "):
+            line = line[7:]
+        key, sep, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ConfigError([f"{path.name}:{lineno}: KEY=VALUE 형식이 아닙니다"])
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+        keys.append(key)
+    return keys
 
 def resolve_env(value, errors: list[str], where: str):
     """"env:NAME" 문자열을 환경변수 값으로 바꾼다(dict/list 는 재귀)."""
@@ -344,6 +371,10 @@ def load_config(path: str | Path) -> Config:
             errors.append(f"notify.webhooks[{i}]: url 이 필요합니다")
         elif hook.get("type", "generic") not in ("slack", "teams", "googlechat", "generic"):
             errors.append(f"notify.webhooks[{i}]: type 은 slack, teams, googlechat, generic 중 하나입니다")
+    try:
+        float(notify.get("heartbeat_hours", 0) or 0)
+    except (TypeError, ValueError):
+        errors.append("notify.heartbeat_hours: 숫자여야 합니다")
     email = notify.get("email")
     if email and (not email.get("smtp") or not email.get("to")):
         errors.append("notify.email: smtp 와 to 가 필요합니다")

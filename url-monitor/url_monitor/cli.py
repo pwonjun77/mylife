@@ -8,6 +8,8 @@
     python -m url_monitor watch targets.json --db monitor.db --status-page status.html
     python -m url_monitor report --db monitor.db --since 7d -f html -o weekly.html
     python -m url_monitor validate targets.json
+    python -m url_monitor notify-test targets.json --teams-webhook env:URLMON_TEAMS_WEBHOOK
+    pythonw -m url_monitor watch targets.json --env-file url-monitor.env --log-file monitor.log --keep-awake
 
 종료코드: 0 전체 정상, 1 경고 있음, 2 장애 있음, 3 설정·실행 오류
 """
@@ -21,8 +23,10 @@ from datetime import datetime
 from pathlib import Path
 
 from . import __version__
-from .config import ConfigError, load_config, target_from_url
+from .background import RotatingLog, allow_sleep, keep_awake
+from .config import Config, ConfigError, load_config, load_env_file, resolve_env, target_from_url
 from .models import Status
+from .notifier import send_all, summary_text
 from .report import render_history_html, render_history_text, render_html, render_json, render_text
 from .scheduler import check_all, process_results, watch
 from .store import Store, parse_since
@@ -47,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--timeout", type=float, help="모든 대상의 timeout_sec 덮어쓰기")
     c.add_argument("--no-retry", action="store_true", help="장애 시 재시도하지 않음 (빠른 확인용)")
     c.add_argument("--no-color", action="store_true")
+    _common(c)
 
     w = sub.add_parser("watch", help="주기 점검 (상주 실행, Ctrl+C 로 종료)")
     w.add_argument("config")
@@ -56,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
     w.add_argument("--workers", type=int)
     w.add_argument("--rounds", type=int, default=0, help=argparse.SUPPRESS)  # 테스트용: N회 점검 후 종료
     w.add_argument("-q", "--quiet", action="store_true", help="화면에 변화만 출력")
+    w.add_argument("--log-file", help="출력을 이 파일로 기록 (5MB 단위 순환). 창 없이 실행할 때 사용")
+    w.add_argument("--keep-awake", action="store_true",
+                   help="실행 중 PC 절전 방지 (Windows, 화면 꺼짐·잠금은 허용)")
+    w.add_argument("--notify-start", action="store_true", help="첫 점검이 끝나면 '모니터링 시작' 알림 (재부팅 후 동작 확인용)")
+    w.add_argument("--heartbeat-hours", type=float, help="N시간마다 '정상 동작 중' 요약 알림 (0=끔)")
+    _common(w)
 
     r = sub.add_parser("report", help="이력 DB로 가용률 보고서 생성")
     r.add_argument("--db", default="monitor.db")
@@ -65,7 +76,41 @@ def build_parser() -> argparse.ArgumentParser:
 
     v = sub.add_parser("validate", help="설정 파일 검사 (URL 형식, 환경변수, 중복 등)")
     v.add_argument("config")
+    _common(v)
+
+    n = sub.add_parser("notify-test", help="알림 채널(Teams 등)로 시험 메시지 발송")
+    n.add_argument("config", nargs="?", help="설정 파일 (생략하면 --teams-webhook 만 사용)")
+    _common(n)
     return p
+
+
+def _common(sp) -> None:
+    sp.add_argument("--env-file", help="KEY=VALUE 형식 환경변수 파일 (웹훅 주소 등 비밀값 보관용)")
+    sp.add_argument("--teams-webhook", help="Teams 웹훅 주소 추가. env:변수명 형식 가능")
+
+
+def _apply_common(args, cfg: Config | None) -> Config:
+    """--env-file 은 설정 로드 전에, --teams-webhook 은 로드 후에 적용한다."""
+    if cfg is None:
+        cfg = Config(targets=[], source="-")
+    url = getattr(args, "teams_webhook", None)
+    if url:
+        errors: list[str] = []
+        url = resolve_env(url, errors, "--teams-webhook")
+        if not errors and not url.startswith(("http://", "https://")):
+            errors.append("--teams-webhook: http(s) 주소가 아닙니다")
+        if errors:
+            raise ConfigError(errors)
+        hooks = cfg.notify.setdefault("webhooks", [])
+        if not any(h.get("url") == url for h in hooks):
+            hooks.append({"type": "teams", "url": url})
+    return cfg
+
+
+def _load(args, path: str | None) -> Config:
+    if getattr(args, "env_file", None):
+        load_env_file(args.env_file)
+    return _apply_common(args, load_config(path) if path else None)
 
 
 def _write(text: str, output: str | None) -> None:
@@ -79,7 +124,10 @@ def _write(text: str, output: str | None) -> None:
 def _write_atomic(path: str, text: str) -> None:
     tmp = Path(path + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    try:
+        tmp.replace(path)
+    except PermissionError:  # Windows: 다른 프로그램이 파일을 잡고 있으면 다음 갱신 때 다시 시도
+        pass
 
 
 def _exit_code(results) -> int:
@@ -90,11 +138,9 @@ def cmd_check(args) -> int:
     if not args.config and not args.url:
         print("설정 파일 또는 --url 을 지정하세요.", file=sys.stderr)
         return EXIT_ERROR
-    notify, settings, source = {}, {"workers": 20, "retention_days": 90}, "--url"
-    targets = []
-    if args.config:
-        cfg = load_config(args.config)
-        targets, notify, settings, source = cfg.targets, cfg.notify, cfg.settings, cfg.source
+    cfg = _load(args, args.config)
+    targets, notify, settings = list(cfg.targets), cfg.notify, cfg.settings
+    source = cfg.source if args.config else "--url"
     targets += [target_from_url(u) for u in args.url]
     if args.group:
         targets = [t for t in targets if t.group in args.group]
@@ -137,13 +183,40 @@ def cmd_check(args) -> int:
 
 
 def cmd_watch(args) -> int:
-    cfg = load_config(args.config)
+    if not args.log_file:
+        return _watch(args)
+    log = RotatingLog(args.log_file)
+    saved = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = log  # pythonw 로 실행하면 원래 None 이라 출력이 사라짐
+    try:
+        return _watch(args)
+    except Exception as exc:  # 창 없이 실행 중이므로 치명적 오류도 로그에 남기고 종료코드로 알림(작업 스케줄러 재시작)
+        print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] [치명적 오류] {type(exc).__name__}: {exc}", file=log)
+        raise
+    finally:
+        sys.stdout, sys.stderr = saved
+        log.close()
+
+
+def _watch(args) -> int:
+    cfg = _load(args, args.config)
     store = Store(args.db)
-    notify = None if args.no_notify else (cfg.notify or None)
+    if args.notify_start:
+        cfg.notify["notify_start"] = True
+    if args.heartbeat_hours is not None:
+        cfg.notify["heartbeat_hours"] = args.heartbeat_hours
+    has_channel = cfg.notify.get("webhooks") or cfg.notify.get("email")
+    notify = None if args.no_notify or not has_channel else cfg.notify
     n = len([t for t in cfg.targets if t.enabled])
-    print(f"[{datetime.now():%H:%M:%S}] {n}개 대상 주기 점검 시작 (DB {args.db}"
-          f"{', 알림 켜짐' if notify else ', 알림 꺼짐'}). Ctrl+C 로 종료합니다.", file=sys.stderr)
+    awake = keep_awake() if args.keep_awake else False
+    if args.keep_awake and not awake:
+        print("[안내] --keep-awake 는 Windows 에서만 동작합니다.", file=sys.stderr)
+    print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {n}개 대상 주기 점검 시작 (DB {args.db}"
+          f"{', 알림 켜짐' if notify else ', 알림 꺼짐'}{', 절전 방지' if awake else ''}). Ctrl+C 로 종료합니다.",
+          file=sys.stderr, flush=True)
     last_status: dict[str, Status] = {}
+    heartbeat_sec = float((notify or {}).get("heartbeat_hours", 0) or 0) * 3600
+    state = {"started_sent": not (notify or {}).get("notify_start"), "last_beat": time.monotonic()}
 
     def on_cycle(results, latest):
         for r in results:
@@ -151,11 +224,21 @@ def cmd_watch(args) -> int:
             last_status[r.target.key] = r.status
             if changed or not args.quiet:
                 ms = "-" if r.probe.total_ms is None else f"{r.probe.total_ms:,.0f}ms"
-                print(f"[{datetime.now():%H:%M:%S}] {r.status.label:<4} {r.target.key}  {ms}  {r.message}", flush=True)
+                print(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {r.status.label:<4} {r.target.key}  {ms}  {r.message}",
+                      flush=True)
+        ordered = [latest[t.key] for t in cfg.targets if t.key in latest]
+        if notify and len(latest) == n:
+            # 시작 알림은 첫 바퀴가 끝난 뒤(현재 상태 요약 포함), 하트비트는 heartbeat_hours 마다
+            if not state["started_sent"]:
+                send_all(notify, "[URL 모니터] 모니터링 시작", summary_text(ordered))
+                state["started_sent"] = True
+                state["last_beat"] = time.monotonic()
+            elif heartbeat_sec and time.monotonic() - state["last_beat"] >= heartbeat_sec:
+                send_all(notify, "[URL 모니터] 정상 동작 중 (정기 보고)", summary_text(ordered))
+                state["last_beat"] = time.monotonic()
         if args.status_page:
             rows = {a["target"]: a for a in store.availability(parse_since("24h"))}
             meta = {"started": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "elapsed": 0, "source": cfg.source}
-            ordered = [latest[t.key] for t in cfg.targets if t.key in latest]
             _write_atomic(args.status_page, render_html(ordered, meta, rows, title="시스템 상태", refresh=30))
 
     try:
@@ -163,7 +246,24 @@ def cmd_watch(args) -> int:
               max_rounds=args.rounds, retention_days=int(cfg.settings["retention_days"]))
     finally:
         store.close()
+        if awake:
+            allow_sleep()
     return 0
+
+
+def cmd_notify_test(args) -> int:
+    cfg = _load(args, args.config)
+    hooks = cfg.notify.get("webhooks") or []
+    if not hooks and not cfg.notify.get("email"):
+        print("알림 채널이 없습니다. 설정 파일의 notify 또는 --teams-webhook 을 지정하세요.", file=sys.stderr)
+        return EXIT_ERROR
+    import socket
+    body = (f"URL 모니터 알림 시험 메시지입니다.\n보낸 곳: {socket.gethostname()} · "
+            f"{datetime.now():%Y-%m-%d %H:%M:%S} · 대상 {len(cfg.targets)}개")
+    ok = send_all(cfg.notify, "[URL 모니터] 알림 시험", body)
+    channels = len(hooks) + (1 if cfg.notify.get("email") else 0)
+    print(f"{'발송 성공' if ok else '발송 실패'} (채널 {channels}개)" + ("" if ok else " - 위 오류를 확인하세요"))
+    return 0 if ok else EXIT_ERROR
 
 
 def cmd_report(args) -> int:
@@ -188,7 +288,7 @@ def cmd_report(args) -> int:
 
 
 def cmd_validate(args) -> int:
-    cfg = load_config(args.config)
+    cfg = _load(args, args.config)
     groups: dict[str, int] = {}
     for t in cfg.targets:
         groups[t.group] = groups.get(t.group, 0) + 1
@@ -203,7 +303,8 @@ def cmd_validate(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    handlers = {"check": cmd_check, "watch": cmd_watch, "report": cmd_report, "validate": cmd_validate}
+    handlers = {"check": cmd_check, "watch": cmd_watch, "report": cmd_report, "validate": cmd_validate,
+                "notify-test": cmd_notify_test}
     try:
         return handlers[args.cmd](args)
     except ConfigError as exc:
