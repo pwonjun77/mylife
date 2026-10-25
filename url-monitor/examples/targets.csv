@@ -1,0 +1,3 @@
+group,name,url,expect_status,body_contains,warn_response_ms
+대외서비스,예제 사이트,https://example.com,200,Example Domain,
+대외서비스,IANA,https://www.iana.org,200-399,,1500

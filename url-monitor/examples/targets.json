@@ -1,0 +1,25 @@
+{
+  "defaults": {
+    "interval_sec": 60,
+    "timeout_sec": 10,
+    "retries": 2,
+    "expect_status": "200-399",
+    "warn_response_ms": 2000,
+    "cert_warn_days": 14
+  },
+  "groups": {
+    "대외서비스": [
+      { "name": "예제 사이트", "url": "https://example.com", "body_contains": "Example Domain" },
+      { "name": "위키백과", "url": "https://ko.wikipedia.org/wiki/대문", "warn_response_ms": 1500 }
+    ],
+    "점검용 샘플": [
+      { "name": "만료 인증서", "url": "https://expired.badssl.com/" },
+      { "name": "404 페이지", "url": "https://example.com/no-such-page", "expect_status": "200" }
+    ]
+  },
+  "notify": {
+    "webhooks": [],
+    "repeat_every_min": 30
+  },
+  "settings": { "workers": 20, "retention_days": 90 }
+}
