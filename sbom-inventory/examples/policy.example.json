@@ -1,0 +1,10 @@
+{
+  "rules": [
+    {"match": "google chrome", "min_version": "131.0.6778.85", "severity": "high", "note": "브라우저 원격코드실행 패치"},
+    {"match": "7-zip", "min_version": "24.07", "severity": "high", "note": "CVE-2024-11477"},
+    {"match": "openssh", "type": "service", "min_version": "9.8", "severity": "critical", "note": "regreSSHion CVE-2024-6387 등"},
+    {"match": "nginx", "type": "service", "min_version": "1.26.0", "severity": "medium"},
+    {"match": "anydesk|teamviewer|rustdesk", "regex": true, "forbidden": true, "severity": "medium", "note": "비인가 원격제어 도구"},
+    {"match": "windows 10", "type": "os", "eol": "2025-10-14", "severity": "high"}
+  ]
+}

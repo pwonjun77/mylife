@@ -1,0 +1,7 @@
+{"schema":"sbom-inventory-agent/1","collected_at":"2026-11-01T01:00:00Z",
+ "host":{"hostname":"PC-021","fqdn":"PC-021.corp.local","serial":"5CG1234XYZ","os":"Microsoft Windows 10 Enterprise","os_version":"10.0.19045.5011","macs":["AA-BB-CC-00-00-21"],"ips":["10.10.1.21"]},
+ "packages":[
+  {"name":"Google Chrome","version":"129.0.6668.90","vendor":"Google LLC","source":"registry","scope":"machine"},
+  {"name":"7-Zip 23.01 (x64)","version":"23.01","vendor":"Igor Pavlov","source":"registry","scope":"machine"},
+  {"name":"AnyDesk","version":"8.0.9","vendor":"AnyDesk Software GmbH","source":"registry","scope":"user:S-1-5-21-1-2-3-1001"}
+ ]}

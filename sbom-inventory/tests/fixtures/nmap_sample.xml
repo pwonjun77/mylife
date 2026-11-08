@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nmaprun scanner="nmap" args="nmap -sV -O -oX scan.xml 10.10.1.0/24" version="7.94">
+<host><status state="up"/>
+<address addr="10.10.1.21" addrtype="ipv4"/><address addr="AA:BB:CC:00:00:21" addrtype="mac" vendor="Dell"/>
+<hostnames><hostname name="PC-021.corp.local" type="PTR"/></hostnames>
+<ports>
+<port protocol="tcp" portid="445"><state state="open"/><service name="microsoft-ds" product="Microsoft Windows SMB" method="probed" conf="10"><cpe>cpe:/o:microsoft:windows</cpe></service></port>
+<port protocol="tcp" portid="3389"><state state="open"/><service name="ms-wbt-server" product="Microsoft Terminal Services" method="probed" conf="10"/></port>
+</ports>
+<os><osmatch name="Microsoft Windows 10 1809 - 21H2" accuracy="96"><osclass vendor="Microsoft" osfamily="Windows"><cpe>cpe:/o:microsoft:windows_10</cpe></osclass></osmatch></os>
+</host>
+<host><status state="up"/>
+<address addr="10.10.1.50" addrtype="ipv4"/><address addr="AA:BB:CC:00:00:50" addrtype="mac" vendor="Synology"/>
+<ports>
+<port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="OpenSSH" version="8.2p1 Ubuntu 4ubuntu0.5" extrainfo="Ubuntu Linux; protocol 2.0" ostype="Linux" method="probed" conf="10"><cpe>cpe:/a:openbsd:openssh:8.2p1</cpe><cpe>cpe:/o:linux:linux_kernel</cpe></service></port>
+<port protocol="tcp" portid="443"><state state="open"/><service name="http" product="nginx" version="1.18.0" tunnel="ssl" method="probed" conf="10"><cpe>cpe:/a:igor_sysoev:nginx:1.18.0</cpe></service></port>
+</ports>
+</host>
+<host><status state="down"/><address addr="10.10.1.99" addrtype="ipv4"/></host>
+</nmaprun>
