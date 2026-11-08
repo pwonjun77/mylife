@@ -1,15 +1,30 @@
 {
-  "agent_dirs": ["/mnt/sbom-share"],
+  "agent_dirs": [
+    "/mnt/sbom-share"
+  ],
   "verify_hash": true,
-  "intune":   {"enabled": true,  "mode": "per-app"},
-  "defender": {"enabled": false},
+  "intune": {
+    "enabled": true,
+    "mode": "per-app"
+  },
+  "defender": {
+    "enabled": false
+  },
   "nmap": {
-    "targets": ["10.10.0.0/24", "10.10.1.0/24"],
+    "targets": [
+      "10.10.0.0/24",
+      "10.10.1.0/24"
+    ],
     "exclude": "10.10.0.1",
     "top_ports": 1000,
     "os_detect": false,
     "timing": 3
   },
   "policy": "examples/policy.example.json",
-  "reports_dir": "reports"
+  "reports_dir": "reports",
+  "dependency_track": {
+    "url": "https://dtrack.corp.local",
+    "parent": "corporate-network",
+    "findings": false
+  }
 }

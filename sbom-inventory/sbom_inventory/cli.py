@@ -9,6 +9,7 @@
   python -m sbom_inventory runs | assets | show PC-001 | history chrome | diff
   python -m sbom_inventory policy policy.json --fail-on high
   python -m sbom_inventory export cyclonedx -o sbom.cdx.json [--asset PC-001]
+  python -m sbom_inventory dtrack --url https://dtrack.corp.local --findings   # Dependency-Track 업로드
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
+from . import dtrack
 from .collectors import agent_import, graph, nmap_scan
 from .export import cyclonedx, html_report, to_csv
 from .policy import SEVERITY, check, load_policy
@@ -135,6 +137,18 @@ def cmd_run(args, store):
                                                  encoding="utf-8")
     (out / f"report-run{rid}.html").write_text(html_report(store, viol, changes, rid), encoding="utf-8")
     log(f"run #{rid} 완료: 변경 {len(changes)}건, 정책 위반 {len(viol)}건 → {out}/")
+    dt = cfg.get("dependency_track") or {}
+    if dt.get("url"):
+        try:
+            res = dtrack.push(store, dtrack.client_from_env(dt["url"], dt.get("ca_bundle")), run_id=rid,
+                              parent=dt.get("parent", "corporate-network"), prefix=dt.get("prefix", ""),
+                              version_from_run=dt.get("version_from_run", False),
+                              fetch_findings=dt.get("findings", False), log=log)
+            if any(r.error and not r.error.startswith("컴포넌트 없음") for r in res):
+                failed.append("dependency_track")
+        except dtrack.DTrackError as e:
+            failed.append("dependency_track")
+            log(f"[실패] dependency_track: {e}")
     return 1 if failed else 0
 
 
@@ -225,6 +239,37 @@ def cmd_export(args, store):
     return 0
 
 
+def cmd_dtrack(args, store):
+    client = None if args.dry_run else dtrack.client_from_env(args.url, args.ca_bundle)
+    if client:
+        v = client.version()
+        log(f"Dependency-Track {v.get('version', '?')} ({client.base}) 연결 확인")
+    res = dtrack.push(store, client, run_id=args.run, assets=args.asset or None,
+                      parent=None if args.no_parent else args.parent, project_version=args.project_version,
+                      version_from_run=args.version_from_run, prefix=args.prefix, wait=not args.no_wait,
+                      fetch_findings=args.findings, tags=not args.no_tags, dry_run=args.dry_run, log=log)
+    ok = [r for r in res if not r.error]
+    if args.dry_run:
+        for r in res:
+            print(f"  [dry-run] {r.project:<28} {r.version:<10} 컴포넌트 {r.components}  {r.error}")
+    if args.findings:
+        sev = {}
+        for r in ok:
+            for f in r.findings:
+                s = (f.get("vulnerability") or {}).get("severity", "UNASSIGNED")
+                sev[s] = sev.get(s, 0) + 1
+            for f in r.findings[:args.show_findings]:
+                v, c = f.get("vulnerability") or {}, f.get("component") or {}
+                print(f"  {r.project:<20} {v.get('severity', ''):<9} {v.get('vulnId', ''):<20} "
+                      f"{c.get('name', '')} {c.get('version', '')}")
+        log(f"취약점 합계: {sev or '없음'}")
+    if args.report:
+        Path(args.report).write_text(json.dumps([r.__dict__ for r in res], ensure_ascii=False, indent=1),
+                                     encoding="utf-8")
+    log(f"업로드 {len(ok)}/{len(res)} 프로젝트 완료")
+    return 0 if len(ok) == len(res) or all(r.error.startswith("컴포넌트 없음") for r in res if r.error) else 1
+
+
 # ---------------------------------------------------------------- parser
 
 def build_parser() -> argparse.ArgumentParser:
@@ -293,6 +338,24 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--policy", help="html 보고서에 포함할 정책 파일")
     s.add_argument("-o", "--output")
     s.set_defaults(func=cmd_export)
+
+    s = sub.add_parser("dtrack", help="OWASP Dependency-Track 으로 장비별 CycloneDX 업로드 (API 키: DTRACK_API_KEY)")
+    s.add_argument("--url", help="Dependency-Track API 주소 (또는 DTRACK_URL)")
+    s.add_argument("--ca-bundle", help="사내 CA 인증서 PEM (또는 DTRACK_CA_BUNDLE)")
+    s.add_argument("--asset", action="append", help="특정 자산만 (여러 번 지정 가능, 기본: 전체)")
+    s.add_argument("--run", type=int, help="업로드할 run (기본: 최신)")
+    s.add_argument("--parent", default="corporate-network", help="상위 프로젝트명 (기본: corporate-network)")
+    s.add_argument("--no-parent", action="store_true", help="상위 프로젝트 없이 업로드")
+    s.add_argument("--prefix", default="", help="프로젝트명 접두어 (예: 'pc/')")
+    s.add_argument("--project-version", default="current", help="DT 프로젝트 버전 (기본: current)")
+    s.add_argument("--version-from-run", action="store_true", help="프로젝트 버전을 run-<N> 으로 (DT 에도 이력 보존)")
+    s.add_argument("--no-tags", action="store_true", help="출처/OS 태그를 붙이지 않음 (DT 4.12 미만)")
+    s.add_argument("--no-wait", action="store_true", help="BOM 처리 완료를 기다리지 않음")
+    s.add_argument("--findings", action="store_true", help="처리 후 취약점(findings) 조회")
+    s.add_argument("--show-findings", type=int, default=20, help="프로젝트별로 출력할 취약점 수")
+    s.add_argument("--report", help="업로드 결과(JSON) 저장 경로")
+    s.add_argument("--dry-run", action="store_true", help="전송 없이 업로드 대상만 출력")
+    s.set_defaults(func=cmd_dtrack)
     return p
 
 
@@ -301,6 +364,6 @@ def main(argv: list[str] | None = None) -> int:
     store = Store(args.db)
     try:
         return args.func(args, store)
-    except (graph.AuthError, RuntimeError, ValueError, KeyError) as e:
+    except (graph.AuthError, dtrack.DTrackError, RuntimeError, ValueError, KeyError) as e:
         log(f"오류: {e}")
         return 2

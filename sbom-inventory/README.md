@@ -84,6 +84,7 @@ sbom-inventory/
 │  ├─ store.py               SQLite 스키마, 병합, inventory/diff/history
 │  ├─ policy.py              최소 버전/최대 버전/금지/EOL 정책
 │  ├─ export.py              CycloneDX 1.6, CSV, HTML 보고서
+│  ├─ dtrack.py              Dependency-Track 업로드 (장비별 프로젝트, 처리 대기, findings)
 │  └─ cli.py
 ├─ agents/
 │  ├─ collect-windows.ps1    Uninstall 레지스트리(HKLM, WOW6432Node, HKU) [+Appx]
@@ -212,14 +213,53 @@ ssh host 'OUT_DIR=- sh -s' < agents/collect-linux.sh > /srv/sbom/host.json
 
 ---
 
-## 6. 확장 아이디어
+## 6. OWASP Dependency-Track 연동 (`dtrack`)
 
-- **취약점 매칭**: CycloneDX 결과를 OWASP Dependency-Track(오픈소스)에 업로드하면 NVD/OSV/GitHub Advisory 매칭과 대시보드를 그대로 활용 가능 (`PUT /api/v1/bom`)
-- Linux 패키지는 purl(`pkg:deb/ubuntu/openssl@…`)이 표준이므로 OSV.dev API 로 바로 조회 가능
+인벤토리를 **장비 1대 = DT 프로젝트 1개**(classifier `DEVICE`)로 업로드하고 상위 프로젝트 `corporate-network` 아래에 묶습니다.
+DT 는 프로젝트 단위로 취약점·정책·메트릭을 계산하므로, 전사 BOM 하나로 올리면 "어느 PC 가 취약한지"가 사라지기 때문입니다.
+
+```
+sbom-inventory DB ──(run N, 자산별 CycloneDX 1.6)──▶ PUT /api/v1/bom {projectName=hostname, autoCreate, parentName, projectTags}
+                                                    │  token
+                                                    ▼
+                                           GET /api/v1/event/token/{token}  (처리 완료 폴링)
+                                                    ▼
+                         DT 분석기: purl → OSV / GitHub Advisories / OSS Index,  CPE → NVD(내부 분석기)
+                                                    ▼
+                                           GET /api/v1/finding/project/{uuid}  (--findings)
+```
+
+```bash
+export DTRACK_API_KEY=odt_xxxxx                      # 비밀값은 환경변수로만
+python3 -m sbom_inventory dtrack --url https://dtrack.corp.local --dry-run          # 대상 확인
+python3 -m sbom_inventory dtrack --url https://dtrack.corp.local --findings --report dt.json
+python3 -m sbom_inventory dtrack --url https://dtrack.corp.local --asset PC-021 --ca-bundle corp-ca.pem
+python3 -m sbom_inventory dtrack --url ... --version-from-run   # 프로젝트 버전을 run-<N> 으로 → DT 에도 이력 보존
+```
+
+**DT 쪽 준비** (Administration → Access Management → Teams)
+- 업로드 전용 팀(기본 `Automation`)에 권한: `BOM_UPLOAD`, `PROJECT_CREATION_UPLOAD`, `VIEW_PORTFOLIO`, `VIEW_VULNERABILITY`(+ 상위 프로젝트 자동 생성 시 `PORTFOLIO_MANAGEMENT`) → API Key 발급
+- Administration → Vulnerability Sources: NVD(CPE 매칭), OSV 생태계(`Ubuntu`, `Debian`, `Red Hat`, `PyPI` …), GitHub Advisories 활성화
+
+**출처별 매칭 품질** — DT 가 무엇을 근거로 취약점을 찾는지 알아야 결과를 해석할 수 있습니다.
+
+| 출처 | 식별자 | DT 매칭 |
+|------|--------|---------|
+| Linux 에이전트 (dpkg/rpm/apk) | `pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.4` | **OSV 배포판 생태계로 정확 매칭** (백포트 패치 버전 반영) |
+| Nmap 서비스 | `cpe:2.3:a:openbsd:openssh:8.2p1` | NVD CPE 매칭 — 업스트림 버전 기준이므로 배포판 백포트 오탐 가능 |
+| Defender TVM | vendor/product 로 구성한 CPE | NVD CPE 매칭 (Defender 자체 취약점 수는 properties 에 보존) |
+| Windows 레지스트리 / Intune | `pkg:generic/...` (CPE 없음) | **매칭 안 됨** — Windows 앱 취약점은 Defender TVM 결과 또는 정책(min_version) 점검으로 보완 |
+
+> DT 는 업로드마다 프로젝트 컴포넌트를 **교체**합니다(현재 상태 뷰). 시점별 이력·diff 는 이 도구의 SQLite 가 원본입니다.
+> `run -c config.json` 에 `"dependency_track": {"url": "...", "findings": false}` 를 넣으면 정기 수집 직후 자동 업로드합니다.
+
+## 7. 확장 아이디어
+
+- Linux 패키지 purl 은 OSV.dev API 로도 직접 조회 가능
 - Defender TVM 의 `numberOfWeaknesses`, `endOfSupportStatus` 는 이미 컴포넌트 properties 에 저장됨
 - Entra ID `devices` API 로 Intune 미등록 조인 장비 목록 보강, Nmap `--script smb-os-discovery` 로 Windows 호스트명/도메인 보강
 
-## 7. 테스트
+## 8. 테스트
 
 ```bash
 python3 -m unittest discover -s tests -v

@@ -191,5 +191,58 @@ class StoreTests(unittest.TestCase):
             agent_import.parse_agent_json({"schema": "x", "host": {"hostname": "a"}})
 
 
+class DTrackTests(unittest.TestCase):
+    def test_push_per_asset_with_parent_and_findings(self):
+        from sbom_inventory import dtrack
+        import base64
+        s = Store(":memory:")
+        r = s.begin_run("x")
+        s.ingest(r, nmap_scan.parse_nmap_xml(FIX / "nmap_sample.xml"))
+        s.ingest(r, agent_import.import_dir(EX / "agent-windows-sample.json")[0])
+        s.end_run(r)
+
+        sent = []
+
+        def opener(req, timeout=0):
+            self.assertEqual(req.get_header("X-api-key"), "odt_SECRET")
+            url, m = req.full_url, req.get_method()
+            body = json.loads(req.data) if req.data else None
+            sent.append((m, url, body))
+            if "/project/lookup" in url and "corporate-network" in url:
+                raise urllib.error.HTTPError(url, 404, "nf", {}, io.BytesIO(b""))
+            if m == "PUT" and url.endswith("/api/v1/project"):
+                return FakeResp(b'{"uuid":"parent"}')
+            if m == "PUT" and url.endswith("/api/v1/bom"):
+                return FakeResp(b'{"token":"t1"}')
+            if "/event/token/" in url:
+                return FakeResp(b'{"processing":false}')
+            if "/project/lookup" in url:
+                return FakeResp(b'{"uuid":"p1"}')
+            if "/finding/project/p1" in url:
+                return FakeResp(json.dumps([{"vulnerability": {"vulnId": "CVE-1", "severity": "HIGH"},
+                                             "component": {"name": "nginx"}}]).encode())
+            raise AssertionError(url)
+
+        c = dtrack.DTrackClient("http://dt:8081/api/", "odt_SECRET", opener=opener)
+        self.assertNotIn("SECRET", repr(c))
+        self.assertEqual(c.base, "http://dt:8081")
+        res = dtrack.push(s, c, fetch_findings=True, log=lambda m: None)
+        self.assertEqual(len(res), 2)
+        self.assertTrue(all(not x.error and x.findings for x in res))
+        boms = [b for m, u, b in sent if m == "PUT" and u.endswith("/bom")]
+        self.assertEqual({b["projectName"] for b in boms}, {"pc-021", "10.10.1.50"})
+        self.assertTrue(all(b["parentName"] == "corporate-network" and b["autoCreate"] for b in boms))
+        nas = next(b for b in boms if b["projectName"] == "10.10.1.50")
+        self.assertIn({"name": "unmanaged"}, nas["projectTags"])
+        bom = json.loads(base64.b64decode(nas["bom"]))
+        self.assertEqual(bom["metadata"]["component"]["type"], "device")
+        self.assertTrue(any(x.get("cpe", "").startswith("cpe:2.3:a:openbsd:openssh") for x in bom["components"]))
+
+    def test_generic_purl_name_is_clean(self):
+        from sbom_inventory.models import make_purl
+        self.assertEqual(make_purl("generic", "7-Zip 23.01 (x64)", "23.01", "Igor Pavlov"),
+                         "pkg:generic/igor%20pavlov/7-zip@23.01")
+
+
 if __name__ == "__main__":
     unittest.main()

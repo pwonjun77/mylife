@@ -157,7 +157,8 @@ def make_purl(ptype: str, name: str, version: str = "", namespace: str = "", qua
     s = f"pkg:{ptype}/"
     if namespace:
         s += quote(namespace.lower(), safe="") + "/"
-    s += quote(name if ptype not in ("generic",) else name.lower(), safe="")
+    # generic(Windows 앱 등)은 표준 이름이 없으므로 '7-Zip 23.01 (x64)' → '7-zip' 처럼 정리해 버전 간 동일 키를 유지
+    s += quote(norm_name_loose(name) if ptype == "generic" else name, safe="")
     if version:
         s += "@" + quote(version, safe="")
     if qualifiers:
