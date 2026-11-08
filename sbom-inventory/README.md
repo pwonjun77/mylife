@@ -250,6 +250,22 @@ python3 -m sbom_inventory dtrack --url ... --version-from-run   # 프로젝트 �
 | Defender TVM | vendor/product 로 구성한 CPE | NVD CPE 매칭 (Defender 자체 취약점 수는 properties 에 보존) |
 | Windows 레지스트리 / Intune | `pkg:generic/...` (CPE 없음) | **매칭 안 됨** — Windows 앱 취약점은 Defender TVM 결과 또는 정책(min_version) 점검으로 보완 |
 
+> ⚠️ **검증 결과 (Dependency-Track 4.13.2 + OSV `Ubuntu` 생태계, 2026-11 실측)**
+> Ubuntu 24.04 패키지 847개 업로드 시 25건이 매칭됐으나, 확인한 표본은 모두 **오탐**이었습니다.
+> 예: `UBUNTU-CVE-2014-0207` 은 OSV 원본상 *Ubuntu 14.04 의 `file < 1:5.14-2ubuntu3.1`* 만 해당하는데,
+> 24.04 의 `file 1:5.45-3build1` 에 매칭됨. 대조 실험:
+>
+> | 컴포넌트 버전 | 실제 | DT 매칭 |
+> |---|---|---|
+> | `5.14-2ubuntu3` / `1:5.14-2ubuntu3` | 취약 | **매칭 안 됨 (미탐)** |
+> | `1:5.45-3build1` | 안전 | **22건 매칭 (오탐)** |
+> | `5.45-3build1` (epoch 제거) | 안전 | 0건 |
+>
+> `distro=noble` qualifier 로도 다른 릴리스(trusty) 권고가 걸러지지 않았습니다.
+> 따라서 **deb 패키지의 DT findings 는 그대로 신뢰하지 말고**, `ubuntu-security-status`/`pro fix`, Debian `debsecan`,
+> RHEL `dnf updateinfo` 등 배포판 도구나 OSV.dev API(배포판 릴리스 일치 확인)로 교차 검증하세요.
+> epoch 를 제거하는 우회는 진짜 취약점까지 숨기므로 이 도구는 버전을 원본 그대로 보냅니다.
+
 > DT 는 업로드마다 프로젝트 컴포넌트를 **교체**합니다(현재 상태 뷰). 시점별 이력·diff 는 이 도구의 SQLite 가 원본입니다.
 > `run -c config.json` 에 `"dependency_track": {"url": "...", "findings": false}` 를 넣으면 정기 수집 직후 자동 업로드합니다.
 
